@@ -77,4 +77,4 @@ export interface GenerateMaskResponse {
   selected_mask_index: number;
 }
 
-export type ToolMode = "select" | "edit-vertex" | "add-point" | "positive-click" | "negative-click" | "pan";
+export type ToolMode = "select" | "edit-vertex" | "add-point" | "positive-click" | "negative-click" | "draw-box" | "pan";

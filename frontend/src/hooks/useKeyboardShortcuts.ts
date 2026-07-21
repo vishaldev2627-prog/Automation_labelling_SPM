@@ -71,6 +71,10 @@ export function useKeyboardShortcuts() {
           selectObject(null);
           setToolMode("select");
           break;
+        case "b":
+        case "B":
+          setToolMode("draw-box");
+          break;
         case " ":
           if (toolMode !== "pan") {
             previousTool = toolMode;

@@ -19,6 +19,7 @@ interface DatasetState {
   prev: () => void;
   jumpTo: (imageId: string) => void;
   setClassColor: (classId: number, color: string) => Promise<void>;
+  addClass: (name: string) => Promise<ClassInfo>;
   markImageCompleted: (imageId: string, completed: boolean) => void;
 }
 
@@ -85,6 +86,12 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
     set((state) => ({
       classes: state.classes.map((c) => (c.class_id === classId ? { ...c, color } : c)),
     }));
+  },
+
+  addClass: async (name: string) => {
+    const newClass = await DatasetAPI.addClass(name);
+    set((state) => ({ classes: [...state.classes, newClass] }));
+    return newClass;
   },
 
   markImageCompleted: (imageId: string, completed: boolean) => {

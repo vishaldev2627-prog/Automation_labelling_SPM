@@ -34,7 +34,11 @@ def generate_mask(request: GenerateMaskRequest) -> GenerateMaskResponse:
         elif request.bbox is not None:
             from app.models.schemas import AnnotationObject, ObjectStatus
 
-            obj = AnnotationObject(id=new_id(), class_id=0, bbox=request.bbox, status=ObjectStatus.PENDING)
+            class_id = request.class_id if request.class_id is not None else 0
+            class_name = next((c.name for c in ds.get_classes() if c.class_id == class_id), "")
+            obj = AnnotationObject(
+                id=new_id(), class_id=class_id, class_name=class_name, bbox=request.bbox, status=ObjectStatus.PENDING
+            )
             annotations.objects.append(obj)
         else:
             raise HTTPException(status_code=422, detail="Either object_id or bbox must be provided")

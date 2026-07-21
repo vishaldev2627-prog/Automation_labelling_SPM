@@ -8,6 +8,7 @@ import type { ToolMode } from "../../types";
 
 const TOOLS: { mode: ToolMode; label: string; icon: string }[] = [
   { mode: "select", label: "Select / Edit", icon: "🖱" },
+  { mode: "draw-box", label: "Draw new box (B) — label something the detector missed", icon: "▭" },
   { mode: "positive-click", label: "Positive point", icon: "➕" },
   { mode: "negative-click", label: "Negative point", icon: "➖" },
   { mode: "pan", label: "Pan (space)", icon: "✋" },
@@ -31,8 +32,9 @@ export default function Toolbar() {
     refineWithPoints,
     selectedObjectId,
   } = useAnnotationStore();
-  const { toolMode, setToolMode, showBoundingBox, showMask, showPolygon, showImage, maskOpacity, setMaskOpacity, toggleBoundingBox, toggleMask, togglePolygon, toggleImage, darkMode, toggleDarkMode } =
+  const { toolMode, setToolMode, showBoundingBox, showMask, showPolygon, showImage, maskOpacity, setMaskOpacity, toggleBoundingBox, toggleMask, togglePolygon, toggleImage, darkMode, toggleDarkMode, activeClassId } =
     useSettingsStore();
+  const classes = useDatasetStore((s) => s.classes);
   const [batchRunning, setBatchRunning] = useState(false);
 
   const handleSave = async () => {
@@ -127,6 +129,13 @@ export default function Toolbar() {
           {t.icon}
         </button>
       ))}
+      {toolMode === "draw-box" && (
+        <span className="text-xs text-accent-400">
+          {activeClassId != null
+            ? `Drawing: ${classes.find((c) => c.class_id === activeClassId)?.name ?? "class_" + activeClassId}`
+            : "Pick a class in the sidebar first, then drag on the image"}
+        </span>
+      )}
       {(pendingPositivePoints.length > 0 || pendingNegativePoints.length > 0) && (
         <>
           <button className="toolbar-btn bg-accent-600 text-white" onClick={handleApplyRefinement}>

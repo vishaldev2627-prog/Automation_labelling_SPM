@@ -10,6 +10,7 @@ interface SettingsState {
   darkMode: boolean;
   toolMode: ToolMode;
   hiddenClassIds: Set<number>;
+  activeClassId: number | null;
   zoom: number;
   panX: number;
   panY: number;
@@ -22,6 +23,7 @@ interface SettingsState {
   toggleDarkMode: () => void;
   setToolMode: (mode: ToolMode) => void;
   toggleClassVisibility: (classId: number) => void;
+  setActiveClassId: (classId: number | null) => void;
   setZoom: (zoom: number) => void;
   setPan: (x: number, y: number) => void;
   resetView: () => void;
@@ -36,6 +38,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   darkMode: true,
   toolMode: "select",
   hiddenClassIds: new Set(),
+  activeClassId: null,
   zoom: 1,
   panX: 0,
   panY: 0,
@@ -59,6 +62,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       else next.add(classId);
       return { hiddenClassIds: next };
     }),
+  setActiveClassId: (classId: number | null) => set({ activeClassId: classId }),
   setZoom: (zoom: number) => set({ zoom: Math.min(8, Math.max(0.1, zoom)) }),
   setPan: (x: number, y: number) => set({ panX: x, panY: y }),
   resetView: () => set({ zoom: 1, panX: 0, panY: 0 }),

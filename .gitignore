@@ -36,6 +36,12 @@ exports/*
 models/*
 !models/.gitkeep
 
+# SAM2 upstream source (cloned by setup.sh/setup.bat, not project code)
+sam2_repo/
+
+# Local dataset(s) used for testing/annotation - not project code
+sample_dataset/
+
 # Editor / OS
 .vscode/
 .idea/

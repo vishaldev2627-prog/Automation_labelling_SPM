@@ -18,6 +18,7 @@ export const DatasetAPI = {
   classes: () => api.get<ClassInfo[]>("/dataset/classes").then((r) => r.data),
   setClassColor: (classId: number, color: string) =>
     api.put(`/dataset/classes/${classId}/color`, { color }).then((r) => r.data),
+  addClass: (name: string) => api.post<ClassInfo>("/dataset/classes", { name }).then((r) => r.data),
 };
 
 export const ImagesAPI = {
@@ -41,6 +42,7 @@ export const MaskAPI = {
     imageId: string;
     objectId?: string;
     bbox?: AnnotationObject["bbox"];
+    classId?: number;
     positivePoints?: Point[];
     negativePoints?: Point[];
   }) =>
@@ -49,6 +51,7 @@ export const MaskAPI = {
         image_id: params.imageId,
         object_id: params.objectId,
         bbox: params.bbox,
+        class_id: params.classId,
         positive_points: params.positivePoints ?? [],
         negative_points: params.negativePoints ?? [],
       })

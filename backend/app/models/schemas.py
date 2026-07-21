@@ -66,6 +66,7 @@ class GenerateMaskRequest(BaseModel):
     image_id: str
     object_id: Optional[str] = None
     bbox: Optional[BoundingBox] = None
+    class_id: Optional[int] = None
     positive_points: list[Point] = Field(default_factory=list)
     negative_points: list[Point] = Field(default_factory=list)
 

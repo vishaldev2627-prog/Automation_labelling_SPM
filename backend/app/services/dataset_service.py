@@ -134,6 +134,45 @@ class DatasetService:
             self._colors[str(class_id)] = color
             self._save_meta()
 
+    def add_class(self, name: str) -> ClassInfo:
+        """Add a new class the detector never saw, persisting it back to disk
+        (classes.txt or data.yaml) so it survives the next dataset reload."""
+        self.require_loaded()
+        name = name.strip()
+        if not name:
+            raise ValueError("Class name cannot be empty")
+        with self._lock:
+            if name in self._classes:
+                raise ValueError(f"Class '{name}' already exists")
+            class_id = len(self._classes)
+            self._classes.append(name)
+            color = DEFAULT_PALETTE[class_id % len(DEFAULT_PALETTE)]
+            self._colors[str(class_id)] = color
+            self._save_meta()
+            self._persist_class_names()
+            return ClassInfo(class_id=class_id, name=name, color=color)
+
+    def _persist_class_names(self) -> None:
+        """Write the current class list back to whichever file the dataset
+        originally declared its classes in (data.yaml/.yml or classes.txt)."""
+        if self._images_dir is None:
+            return
+        root = self._images_dir.parent
+        for candidate in ("data.yaml", "data.yml", "dataset.yaml"):
+            yaml_path = root / candidate
+            if yaml_path.exists():
+                try:
+                    import yaml
+
+                    data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+                    data["names"] = list(self._classes)
+                    data["nc"] = len(self._classes)
+                    yaml_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+                except Exception:
+                    logger.exception("Failed to persist class names to %s", yaml_path)
+                return
+        (root / "classes.txt").write_text("\n".join(self._classes) + "\n", encoding="utf-8")
+
     # --------------------------------------------------------------- index
     def list_images(self) -> list[ImageListItem]:
         self.require_loaded()

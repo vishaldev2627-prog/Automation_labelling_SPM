@@ -46,3 +46,16 @@ def set_class_color(class_id: int, payload: dict) -> dict:
         raise HTTPException(status_code=422, detail="color is required")
     get_dataset_service().set_class_color(class_id, color)
     return {"class_id": class_id, "color": color}
+
+
+@router.post("/classes", response_model=ClassInfo)
+def add_class(payload: dict) -> ClassInfo:
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name is required")
+    try:
+        return get_dataset_service().add_class(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DatasetNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

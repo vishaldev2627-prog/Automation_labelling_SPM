@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { ImagesAPI, MaskAPI } from "../api/client";
-import type { AnnotationObject, ImageAnnotations, Point } from "../types";
+import type { AnnotationObject, BoundingBox, ImageAnnotations, Point } from "../types";
 
 const MAX_HISTORY = 50;
 const AUTOSAVE_DEBOUNCE_MS = 800;
@@ -30,6 +30,7 @@ interface AnnotationState {
   regenerateObject: (objectId: string) => Promise<void>;
   refineWithPoints: (objectId: string, positive: Point[], negative: Point[]) => Promise<void>;
   selectMaskCandidate: (objectId: string, maskIndex: number) => Promise<void>;
+  createObjectFromBox: (bbox: BoundingBox, classId: number, className: string) => Promise<void>;
 
   setObjects: (objects: AnnotationObject[], pushHistory?: boolean) => void;
   updateObject: (objectId: string, updater: (obj: AnnotationObject) => AnnotationObject) => void;
@@ -143,6 +144,24 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
       selected_mask_index: result.selected_mask_index,
       status: "edited",
     }));
+  },
+
+  createObjectFromBox: async (bbox: BoundingBox, classId: number, className: string) => {
+    const { imageId } = get();
+    if (!imageId) return;
+    const result = await MaskAPI.generateMask({ imageId, bbox, classId });
+    get().addObject({
+      id: result.object_id,
+      class_id: classId,
+      class_name: className,
+      bbox,
+      polygon: result.polygon,
+      confidence: result.confidence,
+      all_mask_scores: result.all_scores,
+      selected_mask_index: result.selected_mask_index,
+      status: "auto_generated",
+      visible: true,
+    });
   },
 
   selectMaskCandidate: async (objectId: string, maskIndex: number) => {

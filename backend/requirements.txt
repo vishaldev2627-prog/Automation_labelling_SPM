@@ -10,8 +10,10 @@ PyYAML==6.0.2
 
 # PyTorch (install the CUDA build matching your system from https://pytorch.org/get-started/locally/
 # if the default pip wheel below does not include GPU support)
-torch==2.4.1
-torchvision==0.19.1
+# NOTE: must satisfy sam2's own "torch>=2.5.1" requirement (see sam2/setup.py) or
+# `pip install -e ./sam2_repo` will silently upgrade to a newer default (CPU-only) wheel.
+torch==2.5.1
+torchvision==0.20.1
 
 # SAM 2 (Meta) - install from source, see README.md for exact commands:
 #   git clone https://github.com/facebookresearch/sam2.git

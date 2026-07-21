@@ -1,6 +1,7 @@
 import Konva from "konva";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Circle, Image as KonvaImage, Layer, Line, Rect, Stage } from "react-konva";
+import toast from "react-hot-toast";
 import useImage from "use-image";
 import { ImagesAPI } from "../../api/client";
 import { useAnnotationStore } from "../../store/annotationStore";
@@ -9,13 +10,16 @@ import { useSettingsStore } from "../../store/settingsStore";
 import PolygonLayer from "./PolygonLayer";
 
 const MISSING_CLASS_COLOR = "#9ca3af";
+const MIN_DRAW_BOX_PX = 6;
 
 export default function AnnotationCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
+  const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
+  const [drawCurrent, setDrawCurrent] = useState<{ x: number; y: number } | null>(null);
 
-  const { imageId, imageWidth, imageHeight, objects, selectedObjectId, selectObject, addPendingPoint } =
+  const { imageId, imageWidth, imageHeight, objects, selectedObjectId, selectObject, addPendingPoint, createObjectFromBox } =
     useAnnotationStore();
   const pendingPositive = useAnnotationStore((s) => s.pendingPositivePoints);
   const pendingNegative = useAnnotationStore((s) => s.pendingNegativePoints);
@@ -28,11 +32,13 @@ export default function AnnotationCanvas() {
     maskOpacity,
     toolMode,
     hiddenClassIds,
+    activeClassId,
     zoom,
     panX,
     panY,
     setZoom,
     setPan,
+    setToolMode,
   } = useSettingsStore();
 
   const imageUrl = imageId ? ImagesAPI.fileUrl(imageId) : "";
@@ -108,8 +114,67 @@ export default function AnnotationCanvas() {
     }
   };
 
+  const handleDrawMouseDown = () => {
+    if (toolMode !== "draw-box") return;
+    const stage = stageRef.current;
+    const pos = stage?.getRelativePointerPosition();
+    if (!pos) return;
+    setDrawStart(pos);
+    setDrawCurrent(pos);
+  };
+
+  const handleDrawMouseMove = () => {
+    if (toolMode !== "draw-box" || !drawStart) return;
+    const stage = stageRef.current;
+    const pos = stage?.getRelativePointerPosition();
+    if (!pos) return;
+    setDrawCurrent(pos);
+  };
+
+  const handleDrawMouseUp = async () => {
+    if (toolMode !== "draw-box" || !drawStart || !drawCurrent) {
+      setDrawStart(null);
+      setDrawCurrent(null);
+      return;
+    }
+    const x1 = Math.min(drawStart.x, drawCurrent.x);
+    const y1 = Math.min(drawStart.y, drawCurrent.y);
+    const wPx = Math.abs(drawCurrent.x - drawStart.x);
+    const hPx = Math.abs(drawCurrent.y - drawStart.y);
+    setDrawStart(null);
+    setDrawCurrent(null);
+
+    if (wPx < MIN_DRAW_BOX_PX || hPx < MIN_DRAW_BOX_PX || !imageWidth || !imageHeight) return;
+    if (activeClassId == null) {
+      toast.error("Pick a class in the sidebar first, then draw the box");
+      return;
+    }
+    const className = classes.find((c) => c.class_id === activeClassId)?.name ?? "";
+    const bbox = {
+      x_center: (x1 + wPx / 2) / imageWidth,
+      y_center: (y1 + hPx / 2) / imageHeight,
+      width: wPx / imageWidth,
+      height: hPx / imageHeight,
+    };
+
+    try {
+      await toast.promise(createObjectFromBox(bbox, activeClassId, className), {
+        loading: "Generating mask...",
+        success: `Added ${className}`,
+        error: "Mask generation failed",
+      });
+      setToolMode("select");
+    } catch {
+      /* surfaced via toast */
+    }
+  };
+
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-surface-950">
+    <div
+      ref={containerRef}
+      className="relative h-full w-full overflow-hidden bg-surface-950"
+      style={{ cursor: toolMode === "draw-box" ? "crosshair" : undefined }}
+    >
       <Stage
         ref={stageRef}
         width={containerSize.width}
@@ -121,6 +186,9 @@ export default function AnnotationCanvas() {
         draggable={toolMode === "pan"}
         onWheel={handleWheel}
         onClick={handleStageClick}
+        onMouseDown={handleDrawMouseDown}
+        onMouseMove={handleDrawMouseMove}
+        onMouseUp={handleDrawMouseUp}
         onDragEnd={(e) => {
           if (toolMode === "pan") setPan(e.target.x(), e.target.y());
         }}
@@ -184,6 +252,17 @@ export default function AnnotationCanvas() {
           {pendingNegative.map((p, i) => (
             <Circle key={`np-${i}`} x={p.x * imageWidth} y={p.y * imageHeight} radius={5} fill="#ef4444" stroke="#fff" strokeWidth={1} />
           ))}
+          {toolMode === "draw-box" && drawStart && drawCurrent && (
+            <Rect
+              x={Math.min(drawStart.x, drawCurrent.x)}
+              y={Math.min(drawStart.y, drawCurrent.y)}
+              width={Math.abs(drawCurrent.x - drawStart.x)}
+              height={Math.abs(drawCurrent.y - drawStart.y)}
+              stroke={(activeClassId != null && colorForClass.get(activeClassId)) || "#3b82f6"}
+              strokeWidth={1.5}
+              dash={[6, 4]}
+            />
+          )}
         </Layer>
       </Stage>
     </div>

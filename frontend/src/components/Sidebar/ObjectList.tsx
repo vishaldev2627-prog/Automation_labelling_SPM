@@ -2,10 +2,20 @@ import { useAnnotationStore } from "../../store/annotationStore";
 import { useDatasetStore } from "../../store/datasetStore";
 
 export default function ObjectList() {
-  const { objects, selectedObjectId, selectObject, toggleVisibility, deleteObject, regenerateObject } =
+  const { objects, selectedObjectId, selectObject, toggleVisibility, deleteObject, regenerateObject, updateObject } =
     useAnnotationStore();
   const classes = useDatasetStore((s) => s.classes);
   const colorFor = (classId: number) => classes.find((c) => c.class_id === classId)?.color ?? "#9ca3af";
+
+  const handleReclassify = (objectId: string, newClassId: number) => {
+    const newClass = classes.find((c) => c.class_id === newClassId);
+    updateObject(objectId, (o) => ({
+      ...o,
+      class_id: newClassId,
+      class_name: newClass?.name ?? o.class_name,
+      status: "edited",
+    }));
+  };
 
   const active = objects.filter((o) => o.status !== "rejected");
 
@@ -25,7 +35,19 @@ export default function ObjectList() {
             onClick={() => selectObject(o.id)}
           >
             <span className="h-3 w-3 flex-shrink-0 rounded-sm" style={{ backgroundColor: colorFor(o.class_id) }} />
-            <span className="flex-1 truncate text-gray-200">{o.class_name || `class_${o.class_id}`}</span>
+            <select
+              className="min-w-0 flex-1 truncate rounded border-none bg-transparent py-0.5 text-gray-200 hover:bg-surface-700 focus:bg-surface-700"
+              value={o.class_id}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => handleReclassify(o.id, parseInt(e.target.value, 10))}
+              title="Wrong label? Pick the correct class here."
+            >
+              {classes.map((c) => (
+                <option key={c.class_id} value={c.class_id} className="bg-surface-800 text-gray-200">
+                  {c.name}
+                </option>
+              ))}
+            </select>
             <span className="text-xs text-gray-500">{(o.confidence * 100).toFixed(0)}%</span>
             <span
               className={`h-1.5 w-1.5 rounded-full ${
