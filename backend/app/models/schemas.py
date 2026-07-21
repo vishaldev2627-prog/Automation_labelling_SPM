@@ -131,3 +131,24 @@ class BatchJobStatus(BaseModel):
 class ExportRequest(BaseModel):
     image_ids: list[str] = Field(default_factory=list)
     only_completed: bool = True
+
+
+class DetectorTrainJobStatus(BaseModel):
+    job_id: str
+    status: str  # "running" | "completed" | "failed"
+    stage: str = "preparing"  # "preparing" | "training" | "saving" | "done"
+    current_epoch: int = 0
+    total_epochs: int = 0
+    num_images: int = 0
+    error: Optional[str] = None
+    started_at: float
+    updated_at: float
+
+
+class DetectorInfo(BaseModel):
+    active: bool
+    version: int = 0
+    trained_at: Optional[float] = None
+    num_images: int = 0
+    num_classes: int = 0
+    weights_size: str = ""

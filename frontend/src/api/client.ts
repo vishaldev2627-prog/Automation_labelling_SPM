@@ -4,6 +4,8 @@ import type {
   BatchJobStatus,
   ClassInfo,
   DatasetInfo,
+  DetectorInfo,
+  DetectorTrainJobStatus,
   GenerateMaskResponse,
   ImageAnnotations,
   ImageListItem,
@@ -77,6 +79,12 @@ export const ExportAPI = {
 
 export const ProgressAPI = {
   get: () => api.get<DatasetInfo>("/progress").then((r) => r.data),
+};
+
+export const DetectorAPI = {
+  train: () => api.post<DetectorTrainJobStatus>("/detector/train").then((r) => r.data),
+  status: (jobId: string) => api.get<DetectorTrainJobStatus>(`/detector/train/${jobId}`).then((r) => r.data),
+  active: () => api.get<DetectorInfo>("/detector/active").then((r) => r.data),
 };
 
 export default api;

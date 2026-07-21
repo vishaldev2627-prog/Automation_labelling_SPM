@@ -218,6 +218,8 @@ class DatasetService:
         width, height = get_image_dimensions(path)
         label_path = image_stem_to_label_path(self._labels_dir, path)
         detections = parse_detection_label_file(label_path)
+        if not detections:
+            detections = self._try_auto_detect(path)
         objects = [
             AnnotationObject(
                 id=new_id(),
@@ -237,6 +239,20 @@ class DatasetService:
             completed=False,
         )
         return annotations
+
+    def _try_auto_detect(self, path: Path) -> list[tuple[int, BoundingBox]]:
+        """Fall back to the most recently trained detector for images that
+        have no pre-existing detection labels at all."""
+        try:
+            from app.services.detector_service import get_detector_service
+
+            detector = get_detector_service()
+            if not detector.is_active():
+                return []
+            return detector.detect(path, self._classes)
+        except Exception:
+            logger.exception("Auto-detect fallback failed for %s", path)
+            return []
 
     def save_annotations(self, annotations: ImageAnnotations) -> None:
         """Persist annotation state for an image (autosave target)."""

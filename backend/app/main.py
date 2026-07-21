@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.routers import batch, dataset, export, images, masks, progress
+from app.routers import batch, dataset, detector, export, images, masks, progress
 from app.utils.logging_config import setup_logging
 
 settings = get_settings()
@@ -35,6 +35,7 @@ app.include_router(masks.router)
 app.include_router(batch.router)
 app.include_router(export.router)
 app.include_router(progress.router)
+app.include_router(detector.router)
 
 
 @app.get("/api/health")

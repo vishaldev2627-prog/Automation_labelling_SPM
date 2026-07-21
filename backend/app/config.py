@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # Dataset
     dataset_path: str = "../dataset"
     exports_path: str = "../exports"
+    models_path: str = "../models"
     state_dir_name: str = ".annotation_state"
 
     # SAM2
@@ -50,6 +51,10 @@ class Settings(BaseSettings):
     @property
     def exports_dir(self) -> Path:
         return Path(self.exports_path).resolve()
+
+    @property
+    def models_dir(self) -> Path:
+        return Path(self.models_path).resolve()
 
     @property
     def state_dir(self) -> Path:

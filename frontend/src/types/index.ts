@@ -77,4 +77,25 @@ export interface GenerateMaskResponse {
   selected_mask_index: number;
 }
 
+export interface DetectorTrainJobStatus {
+  job_id: string;
+  status: string;
+  stage: string;
+  current_epoch: number;
+  total_epochs: number;
+  num_images: number;
+  error: string | null;
+  started_at: number;
+  updated_at: number;
+}
+
+export interface DetectorInfo {
+  active: boolean;
+  version: number;
+  trained_at: number | null;
+  num_images: number;
+  num_classes: number;
+  weights_size: string;
+}
+
 export type ToolMode = "select" | "edit-vertex" | "add-point" | "positive-click" | "negative-click" | "draw-box" | "pan";

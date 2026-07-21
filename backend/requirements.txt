@@ -3,10 +3,17 @@ uvicorn[standard]==0.30.6
 pydantic==2.9.2
 pydantic-settings==2.5.2
 python-multipart==0.0.9
-opencv-python-headless==4.10.0.84
-numpy==1.26.4
+# NOTE: ultralytics (below) depends on the full opencv-python, which conflicts with
+# opencv-python-headless (both provide the `cv2` module and can't coexist). Let
+# ultralytics pull in opencv-python instead of pinning headless here.
+# numpy is left unpinned too so pip can pick one version satisfying both
+# torch==2.5.1 and ultralytics rather than fighting a stale pin.
 Pillow==10.4.0
 PyYAML==6.0.2
+
+# Detector training/inference (fine-tunes a YOLOv8 model on your corrected
+# annotations; see app/services/detector_service.py)
+ultralytics
 
 # PyTorch (install the CUDA build matching your system from https://pytorch.org/get-started/locally/
 # if the default pip wheel below does not include GPU support)

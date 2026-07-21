@@ -36,6 +36,11 @@ exports/*
 models/*
 !models/.gitkeep
 
+# Pretrained YOLO weights ultralytics auto-downloads into the working
+# directory on first use (yolov8s.pt, etc.) - re-downloaded automatically,
+# not project code
+backend/*.pt
+
 # SAM2 upstream source (cloned by setup.sh/setup.bat, not project code)
 sam2_repo/
 

@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { BatchAPI, ExportAPI } from "../../api/client";
+import { BatchAPI, DetectorAPI, ExportAPI } from "../../api/client";
 import { useAnnotationStore } from "../../store/annotationStore";
 import { useDatasetStore } from "../../store/datasetStore";
 import { useSettingsStore } from "../../store/settingsStore";
-import type { ToolMode } from "../../types";
+import type { DetectorInfo, ToolMode } from "../../types";
 
 const TOOLS: { mode: ToolMode; label: string; icon: string }[] = [
   { mode: "select", label: "Select / Edit", icon: "🖱" },
@@ -36,6 +36,20 @@ export default function Toolbar() {
     useSettingsStore();
   const classes = useDatasetStore((s) => s.classes);
   const [batchRunning, setBatchRunning] = useState(false);
+  const [training, setTraining] = useState(false);
+  const [detectorInfo, setDetectorInfo] = useState<DetectorInfo | null>(null);
+
+  const refreshDetectorInfo = () => {
+    DetectorAPI.active()
+      .then(setDetectorInfo)
+      .catch(() => {
+        /* dataset not loaded yet; ignore */
+      });
+  };
+
+  useEffect(() => {
+    refreshDetectorInfo();
+  }, [info?.dataset_path]);
 
   const handleSave = async () => {
     try {
@@ -87,6 +101,37 @@ export default function Toolbar() {
     } catch {
       toast.error("Failed to start batch job");
       setBatchRunning(false);
+    }
+  };
+
+  const handleTrainDetector = async () => {
+    setTraining(true);
+    try {
+      const job = await DetectorAPI.train();
+      toast.loading("Retraining detector (preparing dataset)...", { id: "train" });
+      const poll = async () => {
+        const status = await DetectorAPI.status(job.job_id);
+        if (status.status === "running") {
+          toast.loading(
+            status.stage === "training"
+              ? `Retraining: epoch ${status.current_epoch}/${status.total_epochs}`
+              : `Retraining: ${status.stage}...`,
+            { id: "train" },
+          );
+          setTimeout(poll, 3000);
+        } else if (status.status === "completed") {
+          toast.success(`Detector retrained on ${status.num_images} images`, { id: "train" });
+          setTraining(false);
+          refreshDetectorInfo();
+        } else {
+          toast.error(status.error ?? "Training failed", { id: "train" });
+          setTraining(false);
+        }
+      };
+      setTimeout(poll, 1500);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail ?? "Failed to start training");
+      setTraining(false);
     }
   };
 
@@ -188,6 +233,19 @@ export default function Toolbar() {
 
       <div className="ml-auto flex items-center gap-2">
         <span className="text-xs text-gray-500">{saving ? "Saving..." : completed ? "Saved ✓" : ""}</span>
+        {detectorInfo?.active && (
+          <span className="text-xs text-gray-500" title={`Trained on ${detectorInfo.num_images} reviewed images`}>
+            Detector v{detectorInfo.version}
+          </span>
+        )}
+        <button
+          className="toolbar-btn"
+          onClick={handleTrainDetector}
+          disabled={training}
+          title="Fine-tune a YOLOv8 detector on every image you've reviewed and marked complete, so it auto-boxes new images correctly next time"
+        >
+          {training ? "Retraining..." : "🎯 Retrain detector"}
+        </button>
         <button className="toolbar-btn" onClick={handleBatchProcess} disabled={batchRunning} title="Batch process entire dataset">
           {batchRunning ? "Processing..." : "⚙ Batch process"}
         </button>
