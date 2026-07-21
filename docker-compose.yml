@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: railway-annotator-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${DATASET_PATH:-./dataset}:/data/dataset
+      - ${EXPORTS_PATH:-./exports}:/data/exports
+      - ${MODELS_PATH:-./models}:/data/models
+      - ./logs:/app/logs
+    environment:
+      - DATASET_PATH=/data/dataset
+      - EXPORTS_PATH=/data/exports
+      - SAM_CHECKPOINT=/data/models/sam2.1_hiera_large.pt
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: railway-annotator-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend

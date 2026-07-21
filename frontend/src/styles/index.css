@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: theme("colors.surface.900");
+}
+::-webkit-scrollbar-thumb {
+  background: theme("colors.surface.600");
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: theme("colors.surface.500");
+}
+
+.konva-stage-container {
+  cursor: default;
+}
+
+.toolbar-btn {
+  @apply rounded-md border border-surface-600 bg-surface-800 px-2.5 py-1.5 text-sm text-gray-200 hover:bg-surface-700 disabled:cursor-not-allowed disabled:opacity-40;
+}
