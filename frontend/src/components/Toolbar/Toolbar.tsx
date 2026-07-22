@@ -15,7 +15,19 @@ const TOOLS: { mode: ToolMode; label: string; icon: string }[] = [
 ];
 
 export default function Toolbar() {
-  const { images, currentIndex, next, prev, info, refreshInfo, refreshImages, markImageCompleted } = useDatasetStore();
+  const { images, currentIndex, next, prev, setCurrentIndex, info, refreshInfo, refreshImages, markImageCompleted } =
+    useDatasetStore();
+  const [frameInput, setFrameInput] = useState("");
+
+  const goToFrame = () => {
+    const n = parseInt(frameInput, 10);
+    if (!Number.isNaN(n) && n >= 1 && n <= images.length) {
+      setCurrentIndex(n - 1);
+    } else {
+      toast.error(`Enter a frame number between 1 and ${images.length}`);
+    }
+    setFrameInput("");
+  };
   const {
     objects,
     imageId,
@@ -159,6 +171,25 @@ export default function Toolbar() {
         </span>
         <button className="toolbar-btn" onClick={next} disabled={currentIndex >= images.length - 1} title="Next (→)">
           ▶
+        </button>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <input
+          type="number"
+          min={1}
+          max={images.length || 1}
+          value={frameInput}
+          onChange={(e) => setFrameInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") goToFrame();
+          }}
+          placeholder="Go to #"
+          className="w-20 rounded border border-surface-600 bg-surface-800 px-2 py-1 text-sm text-gray-200 placeholder:text-gray-500"
+          title="Jump to frame number"
+        />
+        <button className="toolbar-btn" onClick={goToFrame} disabled={images.length === 0} title="Jump to frame">
+          Go
         </button>
       </div>
 
