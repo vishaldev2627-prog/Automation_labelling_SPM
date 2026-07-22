@@ -161,6 +161,8 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
       selected_mask_index: result.selected_mask_index,
       status: "auto_generated",
       visible: true,
+      source: "manual",
+      propagated_from_image_id: null,
     });
   },
 

@@ -107,6 +107,11 @@ class DatasetService:
 
     # ------------------------------------------------------------ metadata
     @property
+    def state_dir(self) -> Path:
+        self.require_loaded()
+        return self._state_dir
+
+    @property
     def meta_path(self) -> Path:
         return self._state_dir / "_meta.json"
 

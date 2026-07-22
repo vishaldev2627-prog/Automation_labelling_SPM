@@ -48,9 +48,19 @@ def save_annotations(request: SaveAnnotationRequest) -> ImageAnnotations:
     try:
         ds = get_dataset_service()
         annotations = ds.get_annotations(request.image_id)
+        was_completed = annotations.completed
         annotations.objects = request.objects
         annotations.completed = request.mark_completed or annotations.completed
         ds.save_annotations(annotations)
+
+        # Only propagate the moment an image is *newly* finalized — not on
+        # every autosave — so a similar image isn't repeatedly overwritten
+        # while this one is still being worked on.
+        if annotations.completed and not was_completed:
+            from app.services.propagation_service import get_propagation_service
+
+            get_propagation_service().propagate_from_async(annotations)
+
         return annotations
     except (DatasetNotFoundError, ImageNotFoundError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

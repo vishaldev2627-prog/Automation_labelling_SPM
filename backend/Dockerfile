@@ -23,6 +23,11 @@ RUN git clone --depth 1 https://github.com/facebookresearch/sam2.git /app/sam2 &
     python3.11 -c "import pathlib; p = pathlib.Path('/app/sam2/sam2/utils/transforms.py'); s = p.read_text(); old = 'torch.jit.script(\n            nn.Sequential(\n                Resize((self.resolution, self.resolution)),\n                Normalize(self.mean, self.std),\n            )\n        )'; new = 'nn.Sequential(\n            Resize((self.resolution, self.resolution)),\n            Normalize(self.mean, self.std),\n        )'; assert old in s, 'pattern not found'; p.write_text(s.replace(old, new))" && \
     python3.11 -m pip install --no-cache-dir -e /app/sam2
 
+# Pre-download the MobileNetV3 ImageNet weights used for annotation
+# propagation's similarity index, so the container doesn't need outbound
+# internet on first use.
+RUN python3.11 -c "import torchvision; torchvision.models.mobilenet_v3_small(weights=torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1)"
+
 COPY . .
 RUN chmod +x entrypoint.sh
 

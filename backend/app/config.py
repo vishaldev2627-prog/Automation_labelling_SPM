@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     min_polygon_points: int = 3
     batch_max_workers: int = 2
 
+    # Similarity-based propagation (Phase 1): when an image is finalized,
+    # carry its accepted objects onto near-duplicate images so they don't
+    # need to be annotated from scratch.
+    propagation_enabled: bool = True
+    similarity_threshold: float = 0.85
+    propagation_top_k: int = 5
+
     # Logging
     log_level: str = "INFO"
     log_file: str = "../logs/backend.log"

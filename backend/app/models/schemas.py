@@ -15,6 +15,15 @@ class ObjectStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class ObjectSource(str, Enum):
+    """Where an object's initial box/class came from — independent of its
+    review status (ObjectStatus), which tracks whether a human has vetted it."""
+
+    DETECTION_BOX = "detection_box"
+    MANUAL = "manual"
+    PROPAGATED = "propagated"
+
+
 class Point(BaseModel):
     x: float
     y: float
@@ -50,6 +59,8 @@ class AnnotationObject(BaseModel):
     selected_mask_index: int = 0
     status: ObjectStatus = ObjectStatus.PENDING
     visible: bool = True
+    source: ObjectSource = ObjectSource.DETECTION_BOX
+    propagated_from_image_id: Optional[str] = None
 
 
 class ImageAnnotations(BaseModel):
@@ -152,3 +163,19 @@ class DetectorInfo(BaseModel):
     num_images: int = 0
     num_classes: int = 0
     weights_size: str = ""
+
+
+class SimilarNeighbor(BaseModel):
+    image_id: str
+    file_name: str
+    similarity: float
+
+
+class SimilarityIndexStatus(BaseModel):
+    job_id: str
+    total: int
+    processed: int
+    status: str  # "running" | "completed" | "failed"
+    started_at: float
+    updated_at: float
+    indexed_images: int = 0

@@ -49,6 +49,14 @@ export default function ObjectList() {
               ))}
             </select>
             <span className="text-xs text-gray-500">{(o.confidence * 100).toFixed(0)}%</span>
+            {o.source === "propagated" && (
+              <span
+                className="rounded-sm bg-purple-900/60 px-1 text-[10px] font-medium uppercase tracking-wide text-purple-300"
+                title="Carried over from a similar, already-annotated image — please review"
+              >
+                Propagated
+              </span>
+            )}
             <span
               className={`h-1.5 w-1.5 rounded-full ${
                 o.status === "confirmed"

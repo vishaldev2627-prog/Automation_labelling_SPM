@@ -11,6 +11,7 @@ export interface BoundingBox {
 }
 
 export type ObjectStatus = "pending" | "auto_generated" | "edited" | "confirmed" | "rejected";
+export type ObjectSource = "detection_box" | "manual" | "propagated";
 
 export interface AnnotationObject {
   id: string;
@@ -23,6 +24,8 @@ export interface AnnotationObject {
   selected_mask_index: number;
   status: ObjectStatus;
   visible: boolean;
+  source: ObjectSource;
+  propagated_from_image_id: string | null;
 }
 
 export interface ImageAnnotations {

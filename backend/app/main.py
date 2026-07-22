@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.routers import batch, dataset, detector, export, images, masks, progress
+from app.routers import batch, dataset, detector, export, images, masks, progress, similarity
 from app.utils.logging_config import setup_logging
 
 settings = get_settings()
@@ -36,6 +36,7 @@ app.include_router(batch.router)
 app.include_router(export.router)
 app.include_router(progress.router)
 app.include_router(detector.router)
+app.include_router(similarity.router)
 
 
 @app.on_event("startup")
@@ -49,6 +50,13 @@ def auto_load_dataset() -> None:
         logger.info("Auto-loaded dataset at %s (%d images)", info.dataset_path, info.total_images)
     except DatasetNotFoundError as exc:
         logger.warning("Skipping dataset auto-load: %s", exc)
+        return
+
+    if settings.propagation_enabled:
+        from app.services.similarity_service import get_similarity_service
+
+        get_similarity_service().start_reindex()
+        logger.info("Started background similarity indexing for annotation propagation")
 
 
 @app.get("/api/health")
