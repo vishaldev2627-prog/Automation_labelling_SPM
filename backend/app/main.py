@@ -38,6 +38,19 @@ app.include_router(progress.router)
 app.include_router(detector.router)
 
 
+@app.on_event("startup")
+def auto_load_dataset() -> None:
+    """Load DATASET_PATH on boot so every client sees the same dataset
+    immediately, with no manual "load dataset" step required."""
+    from app.services.dataset_service import DatasetNotFoundError, get_dataset_service
+
+    try:
+        info = get_dataset_service().load_dataset(settings.dataset_path)
+        logger.info("Auto-loaded dataset at %s (%d images)", info.dataset_path, info.total_images)
+    except DatasetNotFoundError as exc:
+        logger.warning("Skipping dataset auto-load: %s", exc)
+
+
 @app.get("/api/health")
 def health() -> dict:
     from app.services.sam_service import get_sam_service

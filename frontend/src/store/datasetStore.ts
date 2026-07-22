@@ -12,6 +12,7 @@ interface DatasetState {
   error: string | null;
 
   loadDataset: (path: string) => Promise<DatasetInfo>;
+  loadCurrent: () => Promise<DatasetInfo | null>;
   refreshInfo: () => Promise<void>;
   refreshImages: () => Promise<void>;
   setCurrentIndex: (index: number) => void;
@@ -42,6 +43,17 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
     } catch (err: any) {
       set({ loading: false, error: err?.response?.data?.detail ?? err.message ?? "Failed to load dataset" });
       throw err;
+    }
+  },
+
+  loadCurrent: async () => {
+    try {
+      const info = await DatasetAPI.info();
+      const [images, classes] = await Promise.all([ImagesAPI.list(), DatasetAPI.classes()]);
+      set({ datasetPath: info.dataset_path, info, images, classes, currentIndex: 0 });
+      return info;
+    } catch {
+      return null;
     }
   },
 

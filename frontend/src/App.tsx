@@ -12,22 +12,28 @@ import { useDatasetStore } from "./store/datasetStore";
 const LAST_DATASET_KEY = "railway-annotator:last-dataset-path";
 
 export default function App() {
-  const { info, images, currentIndex, loadDataset } = useDatasetStore();
+  const { info, images, currentIndex, loadDataset, loadCurrent } = useDatasetStore();
   const loadImage = useAnnotationStore((s) => s.loadImage);
   const imageLoading = useAnnotationStore((s) => s.loading);
   const generatingAll = useAnnotationStore((s) => s.generatingAll);
 
   useKeyboardShortcuts();
 
-  // Crash recovery: auto-reload the last opened dataset on startup.
+  // The backend auto-loads its configured dataset on boot (see
+  // app.main.auto_load_dataset), so every visitor should land on it
+  // directly. Fall back to the last dataset this browser opened, then to
+  // the manual picker, only if the backend has nothing loaded yet.
   useEffect(() => {
-    const lastPath = localStorage.getItem(LAST_DATASET_KEY);
-    if (lastPath) {
-      loadDataset(lastPath).catch(() => {
-        /* dataset may have moved; user can load manually */
-      });
-    }
-  }, [loadDataset]);
+    loadCurrent().then((current) => {
+      if (current) return;
+      const lastPath = localStorage.getItem(LAST_DATASET_KEY);
+      if (lastPath) {
+        loadDataset(lastPath).catch(() => {
+          /* dataset may have moved; user can load manually */
+        });
+      }
+    });
+  }, [loadDataset, loadCurrent]);
 
   useEffect(() => {
     if (info) localStorage.setItem(LAST_DATASET_KEY, info.dataset_path);
