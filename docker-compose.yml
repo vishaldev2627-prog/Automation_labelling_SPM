@@ -8,9 +8,16 @@ services:
       - path: .env
         required: false
     volumes:
-      - ${DATASET_HOST_PATH:-./dataset}:/data/dataset
-      - ${EXPORTS_HOST_PATH:-./exports}:/data/exports
-      - ${MODELS_HOST_PATH:-./models}:/data/models
+      # Hardcoded absolute host paths rather than ${VAR}-interpolated ones:
+      # Coolify injects its UI-configured env vars straight into the
+      # container, but does not write them into a .env file for compose's
+      # own variable-substitution pass, so ${DATASET_HOST_PATH} silently
+      # fell back to its default and resolved relative to Coolify's managed
+      # app directory instead of the real dataset. This is a single fixed
+      # host deployment, so hardcoding is simplest and actually correct.
+      - /home/omronix/Component/annotation_dataset:/data/dataset
+      - /home/omronix/Component/annotation_tool/exports:/data/exports
+      - /home/omronix/Component/annotation_tool/models:/data/models
       - logs_data:/app/logs
     environment:
       - DATASET_PATH=/data/dataset
