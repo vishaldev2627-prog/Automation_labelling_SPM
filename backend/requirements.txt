@@ -29,4 +29,5 @@ torchvision==0.20.1
 # sam-2
 
 # Optional ONNX runtime backend (CPU or GPU) if SAM_USE_ONNX=true in .env
-onnxruntime-gpu==1.19.2 ; sys_platform == "linux"
+# No aarch64 wheel is published for this pin, so it's restricted to x86_64 hosts.
+onnxruntime-gpu==1.19.2 ; sys_platform == "linux" and platform_machine == "x86_64"

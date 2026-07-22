@@ -7,38 +7,35 @@ services:
     env_file:
       - path: .env
         required: false
-    ports:
-      - "8000:8000"
     volumes:
-      - dataset_data:/data/dataset
-      - exports_data:/data/exports
-      - models_data:/data/models
+      - ${DATASET_HOST_PATH:-./dataset}:/data/dataset
+      - ${EXPORTS_HOST_PATH:-./exports}:/data/exports
+      - ${MODELS_HOST_PATH:-./models}:/data/models
       - logs_data:/app/logs
     environment:
       - DATASET_PATH=/data/dataset
       - EXPORTS_PATH=/data/exports
       - MODELS_PATH=/data/models
       - SAM_CHECKPOINT=/data/models/sam2.1_hiera_large.pt
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # GPU passthrough is available on this host (nvidia-container-toolkit configured),
+    # but the pinned torch==2.5.1 wheel installed from PyPI on aarch64 is CPU-only —
+    # there is no CUDA build for this platform on PyPI. Re-enable once a matching
+    # CUDA-enabled torch wheel (e.g. NVIDIA's own aarch64 build) is wired in.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 
   frontend:
     build:
       context: ./frontend
     container_name: railway-annotator-frontend
     restart: unless-stopped
-    ports:
-      - "5173:80"
     depends_on:
       - backend
 
 volumes:
-  dataset_data:
-  exports_data:
-  models_data:
   logs_data:
