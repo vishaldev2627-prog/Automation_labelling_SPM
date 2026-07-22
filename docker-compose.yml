@@ -5,17 +5,19 @@ services:
     container_name: railway-annotator-backend
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     ports:
       - "8000:8000"
     volumes:
-      - ${DATASET_PATH:-./dataset}:/data/dataset
-      - ${EXPORTS_PATH:-./exports}:/data/exports
-      - ${MODELS_PATH:-./models}:/data/models
-      - ./logs:/app/logs
+      - dataset_data:/data/dataset
+      - exports_data:/data/exports
+      - models_data:/data/models
+      - logs_data:/app/logs
     environment:
       - DATASET_PATH=/data/dataset
       - EXPORTS_PATH=/data/exports
+      - MODELS_PATH=/data/models
       - SAM_CHECKPOINT=/data/models/sam2.1_hiera_large.pt
     deploy:
       resources:
@@ -34,3 +36,9 @@ services:
       - "5173:80"
     depends_on:
       - backend
+
+volumes:
+  dataset_data:
+  exports_data:
+  models_data:
+  logs_data:

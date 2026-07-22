@@ -143,13 +143,47 @@ SAM_ONNX_DECODER_PATH=../models/sam2_decoder.onnx
 
 ```bash
 cd annotation_tool
-cp .env.example .env      # set DATASET_PATH / MODELS_PATH to real host folders
+cp .env.example .env
 docker compose up --build
 ```
 
 Requires the NVIDIA Container Toolkit for GPU passthrough
 (`nvidia-ctk runtime configure --runtime=docker`). Frontend at
 http://localhost:5173, backend at http://localhost:8000.
+
+Dataset, exports, models, and logs live in Docker-managed named volumes
+(`dataset_data`, `exports_data`, `models_data`, `logs_data`) — nothing needs to
+exist on the host beforehand. The SAM2 repo is cloned during the image build
+(`backend/Dockerfile`), and the SAM2.1 checkpoint (~900MB) is downloaded once,
+automatically, into `models_data` the first time the backend container starts
+(`backend/entrypoint.sh`) — it's skipped on every later restart/redeploy since
+it's already on the volume.
+
+### Deploying on Coolify
+
+This repo deploys as-is as a Coolify **Docker Compose** resource:
+
+1. In Coolify: **New Resource → Docker Compose**, point it at this Git repo
+   (`docker-compose.yml` at the root), branch `main`.
+2. Deploy. Coolify builds both images (GPU build for `backend` takes longer
+   the first time), creates the four named volumes, and starts both
+   containers. The backend downloads the SAM2 checkpoint on its first boot —
+   watch the deployment logs for `[entrypoint] ... downloading (~900MB)`.
+3. Confirm the Coolify host has the NVIDIA Container Toolkit installed so the
+   `deploy.resources.reservations.devices` GPU passthrough in the compose file
+   actually attaches a GPU to the `backend` container.
+4. In the resource's **Domains** tab, attach your domain(s) to the `frontend`
+   service (port 80) — the `backend` service doesn't need a public domain
+   since nginx already proxies `/api/*` to it over the internal Docker
+   network (`frontend/nginx.conf`).
+5. The only manual step left is getting your actual image dataset onto the
+   `dataset_data` volume (it's your private data, not app setup) — use
+   Coolify's file manager for that volume, or `docker cp`/`docker compose cp`
+   into the running `backend` container's `/data/dataset`.
+6. Optional overrides (CORS origins, SAM device, log level, etc.) can be set
+   as environment variables in Coolify's **Environment Variables** tab — see
+   `backend/.env.example` for the full list; Coolify writes them into the
+   `.env` the compose file already reads via `env_file`.
 
 ## 4. Workflow
 
