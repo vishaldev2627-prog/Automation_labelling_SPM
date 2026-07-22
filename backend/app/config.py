@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     # SAM2
     sam_checkpoint: str = "../models/sam2.1_hiera_large.pt"
-    sam_model_cfg: str = "sam2.1_hiera_l.yaml"
+    sam_model_cfg: str = "configs/sam2.1/sam2.1_hiera_l.yaml"
     sam_device: Literal["cuda", "cpu", "mps", "auto"] = "auto"
     sam_use_onnx: bool = False
     sam_onnx_encoder_path: str = "../models/sam2_encoder.onnx"
