@@ -25,17 +25,16 @@ services:
       - MODELS_PATH=/data/models
       - SAM_CHECKPOINT=/data/models/sam2.1_hiera_large.pt
       - SAM_MODEL_CFG=configs/sam2.1/sam2.1_hiera_l.yaml
-    # GPU passthrough is available on this host (nvidia-container-toolkit configured),
-    # but the pinned torch==2.5.1 wheel installed from PyPI on aarch64 is CPU-only —
-    # there is no CUDA build for this platform on PyPI. Re-enable once a matching
-    # CUDA-enabled torch wheel (e.g. NVIDIA's own aarch64 build) is wired in.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    # GPU passthrough via nvidia-container-toolkit; the backend image now installs
+    # a CUDA-enabled (cu128) torch build with Blackwell (sm_121) kernels for this
+    # host's GB10 GPU. sam_device=auto picks it up automatically when available.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   frontend:
     build:

@@ -15,12 +15,12 @@ PyYAML==6.0.2
 # annotations; see app/services/detector_service.py)
 ultralytics
 
-# PyTorch (install the CUDA build matching your system from https://pytorch.org/get-started/locally/
-# if the default pip wheel below does not include GPU support)
-# NOTE: must satisfy sam2's own "torch>=2.5.1" requirement (see sam2/setup.py) or
-# `pip install -e ./sam2_repo` will silently upgrade to a newer default (CPU-only) wheel.
-torch==2.5.1
-torchvision==0.20.1
+# PyTorch is installed separately in the Dockerfile, from PyTorch's own CUDA
+# wheel index (torch==2.7.1+cu128 / torchvision==0.22.1+cu128), before this
+# file is installed — see the Dockerfile for why. Left out of this file so a
+# plain `pip install -r requirements.txt` (e.g. local dev without a matching
+# GPU) doesn't fight that pin; install torch yourself for local dev, matching
+# sam2's own "torch>=2.5.1" requirement (see sam2/setup.py).
 
 # SAM 2 (Meta) - install from source, see README.md for exact commands:
 #   git clone https://github.com/facebookresearch/sam2.git

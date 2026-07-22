@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -11,9 +11,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app/backend
 
-COPY requirements.txt .
+# Install GPU-enabled PyTorch first, from PyTorch's own CUDA wheel index, before
+# requirements.txt is installed — that way ultralytics/SAM2 see torch already
+# satisfied and don't pull in a CPU-only default from PyPI (PyPI has no CUDA
+# wheel for aarch64 at all). This host is aarch64 Grace Blackwell (GB10,
+# compute capability 12.1 / sm_121); only cu128+ wheels carry Blackwell kernels.
+# cu128 wheels bundle their own CUDA/cuDNN runtime via pip (nvidia-cudnn-cu12
+# etc.), so the base image only needs to supply the driver-facing CUDA runtime,
+# not a matching cuDNN — hence "runtime" with no cudnn suffix above.
 RUN python3.11 -m pip install --no-cache-dir --upgrade pip && \
-    python3.11 -m pip install --no-cache-dir -r requirements.txt
+    python3.11 -m pip install --no-cache-dir \
+        torch==2.7.1+cu128 torchvision==0.22.1 \
+        --index-url https://download.pytorch.org/whl/cu128
+
+COPY requirements.txt .
+RUN python3.11 -m pip install --no-cache-dir -r requirements.txt
 
 # SAM2 source is baked into the image so Coolify never needs a manual clone step.
 # The patch below disables torch.jit.script() on SAM2Transforms — it segfaults on
