@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     thumbnail_max_dimension: int = 1024
     polygon_epsilon_ratio: float = 0.002
     min_polygon_points: int = 3
+    mask_confidence_threshold: float = 0.5
     batch_max_workers: int = 2
 
     # Similarity-based propagation (Phase 1): when an image is finalized,

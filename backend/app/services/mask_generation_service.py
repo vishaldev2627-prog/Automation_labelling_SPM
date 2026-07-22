@@ -63,14 +63,19 @@ class MaskGenerationService:
             result = self._sam.predict_box(img_rgb, cache_key, box_xyxy, pos_pts, neg_pts)
 
         best_idx = result.best_index
-        polygon = mask_to_polygon(
-            result.masks[best_idx],
-            epsilon_ratio=self._settings.polygon_epsilon_ratio,
-            min_points=self._settings.min_polygon_points,
+        confidence = float(result.scores[best_idx])
+        polygon = (
+            mask_to_polygon(
+                result.masks[best_idx],
+                epsilon_ratio=self._settings.polygon_epsilon_ratio,
+                min_points=self._settings.min_polygon_points,
+            )
+            if confidence > self._settings.mask_confidence_threshold
+            else []
         )
 
         obj.polygon = polygon
-        obj.confidence = float(result.scores[best_idx])
+        obj.confidence = confidence
         obj.all_mask_scores = [float(s) for s in result.scores]
         obj.selected_mask_index = best_idx
         obj.status = ObjectStatus.AUTO_GENERATED if polygon else ObjectStatus.PENDING
