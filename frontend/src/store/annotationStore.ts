@@ -16,6 +16,7 @@ interface AnnotationState {
   saving: boolean;
   saveError: string | null;
   generatingAll: boolean;
+  needsGeneration: boolean;
 
   past: AnnotationObject[][];
   future: AnnotationObject[][];
@@ -59,6 +60,7 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
   saving: false,
   saveError: null,
   generatingAll: false,
+  needsGeneration: false,
   past: [],
   future: [],
   pendingPositivePoints: [],
@@ -83,12 +85,8 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
         objects: data.objects,
         completed: data.completed,
         loading: false,
+        needsGeneration: data.objects.some((o) => o.polygon.length === 0),
       });
-
-      const needsGeneration = data.objects.some((o) => o.polygon.length === 0);
-      if (needsGeneration) {
-        await get().generateAllMasks();
-      }
     } catch (err) {
       set({ loading: false });
       throw err;
@@ -101,7 +99,7 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
     set({ generatingAll: true });
     try {
       const data = await MaskAPI.generateAll(imageId);
-      set({ objects: data.objects, generatingAll: false });
+      set({ objects: data.objects, generatingAll: false, needsGeneration: false });
     } catch (err) {
       set({ generatingAll: false });
       throw err;

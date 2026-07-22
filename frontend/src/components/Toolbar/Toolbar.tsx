@@ -36,6 +36,7 @@ export default function Toolbar() {
     saveNow,
     generateAllMasks,
     generatingAll,
+    needsGeneration,
     saving,
     completed,
     pendingPositivePoints,
@@ -231,8 +232,13 @@ export default function Toolbar() {
       <button className="toolbar-btn" onClick={redo} title="Redo (Ctrl+Y)">
         ↷
       </button>
-      <button className="toolbar-btn" onClick={() => generateAllMasks()} disabled={generatingAll} title="Regenerate all masks for this image">
-        {generatingAll ? "Generating..." : "🪄 Generate all"}
+      <button
+        className={`toolbar-btn ${needsGeneration && !generatingAll ? "animate-pulse bg-amber-600 hover:bg-amber-500" : ""}`}
+        onClick={() => generateAllMasks()}
+        disabled={generatingAll}
+        title={needsGeneration ? "This image has objects without masks yet — click to generate" : "Regenerate all masks for this image"}
+      >
+        {generatingAll ? "Generating..." : needsGeneration ? "🪄 Generate masks" : "🪄 Generate all"}
       </button>
 
       <div className="mx-2 h-6 w-px bg-surface-600" />
