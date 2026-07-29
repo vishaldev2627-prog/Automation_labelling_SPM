@@ -44,5 +44,22 @@ services:
     depends_on:
       - backend
 
+  review-dashboard:
+    build:
+      context: ./review_dashboard
+    container_name: railway-review-dashboard
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # Same exports host path as the backend service above - the dashboard
+      # only needs read/write access to exports/class_folders.
+      - /home/omronix/Component/annotation_tool/exports:/data/exports
+    environment:
+      - CLASS_FOLDERS_ROOT=/data/exports/class_folders
+      - DASHBOARD_USERNAME=${DASHBOARD_USERNAME}
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}
+
 volumes:
   logs_data:
