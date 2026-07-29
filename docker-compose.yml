@@ -58,8 +58,14 @@ services:
       - /home/omronix/Component/annotation_tool/exports:/data/exports
     environment:
       - CLASS_FOLDERS_ROOT=/data/exports/class_folders
-      - DASHBOARD_USERNAME=${DASHBOARD_USERNAME}
-      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}
+      # DASHBOARD_USERNAME / DASHBOARD_PASSWORD are deliberately NOT declared
+      # here as ${VAR}-interpolated entries - see the backend volumes comment
+      # above for why: Coolify injects its UI-configured env vars straight
+      # into the container, not into a .env file compose reads for its own
+      # substitution pass, so ${DASHBOARD_USERNAME} would silently resolve to
+      # empty. Set them directly in Coolify's per-service Environment
+      # Variables tab instead; app.py reads them from the container env at
+      # runtime regardless of whether they're listed here.
 
 volumes:
   logs_data:
