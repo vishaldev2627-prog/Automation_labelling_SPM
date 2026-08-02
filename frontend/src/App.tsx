@@ -42,7 +42,7 @@ export default function App() {
         });
         return;
       }
-      switchView(lastView || "legacy").catch(() => {
+      switchView(lastView || "side_view").catch(() => {
         /* no views configured yet; user can load manually */
       });
     });

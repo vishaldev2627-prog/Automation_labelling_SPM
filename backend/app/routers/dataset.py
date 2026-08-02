@@ -15,10 +15,10 @@ router = APIRouter(prefix="/api/dataset", tags=["dataset"])
 
 # Fixed set of "dataset views" - independent dataset roots (own images/
 # labels/.annotation_state/data.yaml each) living as sibling subfolders under
-# the configured DATASET_PATH. "legacy" is the pre-existing flat dataset,
-# untouched; the other three are the split-by-camera-angle views.
+# the configured DATASET_PATH, split by camera angle. side_view holds the
+# original, fully-annotated dataset; underbelly/wheel_shelling start empty
+# and get populated as that footage becomes available.
 DATASET_VIEWS = [
-    DatasetView(key="legacy", label="Legacy (unsorted)"),
     DatasetView(key="side_view", label="Side View"),
     DatasetView(key="underbelly", label="Underbelly"),
     DatasetView(key="wheel_shelling", label="Wheel Shelling"),

@@ -52,19 +52,19 @@ app.include_router(similarity.router)
 
 @app.on_event("startup")
 def auto_load_dataset() -> None:
-    """Load the "legacy" dataset view on boot for the default session (any
+    """Load the "side_view" dataset view on boot for the default session (any
     client that hasn't sent an X-Session-Id header yet), so there's no
     manual "load dataset" step required before the multi-view dropdown
     lands in the frontend. DATASET_PATH is the parent dir containing the
-    legacy/side_view/underbelly/wheel_shelling sibling folders - see
+    side_view/underbelly/wheel_shelling sibling folders - see
     routers/dataset.py's DATASET_VIEWS."""
     from pathlib import Path
 
     from app.services.dataset_service import DatasetNotFoundError, get_dataset_service
 
-    legacy_path = Path(settings.dataset_path) / "legacy"
+    default_path = Path(settings.dataset_path) / "side_view"
     try:
-        info = get_dataset_service().load_dataset(str(legacy_path))
+        info = get_dataset_service().load_dataset(str(default_path))
         logger.info("Auto-loaded dataset at %s (%d images)", info.dataset_path, info.total_images)
     except DatasetNotFoundError as exc:
         logger.warning("Skipping dataset auto-load: %s", exc)
