@@ -29,6 +29,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def session_context_middleware(request: Request, call_next):
+    """Tag this request with its session id (see app.session_context) so
+    get_dataset_service() and friends resolve to the right session's
+    currently-loaded dataset view instead of one shared global instance."""
+    from app.session_context import set_current_session_id
+
+    set_current_session_id(request.headers.get("x-session-id"))
+    return await call_next(request)
+
 app.include_router(dataset.router)
 app.include_router(images.router)
 app.include_router(masks.router)
@@ -41,12 +52,19 @@ app.include_router(similarity.router)
 
 @app.on_event("startup")
 def auto_load_dataset() -> None:
-    """Load DATASET_PATH on boot so every client sees the same dataset
-    immediately, with no manual "load dataset" step required."""
+    """Load the "legacy" dataset view on boot for the default session (any
+    client that hasn't sent an X-Session-Id header yet), so there's no
+    manual "load dataset" step required before the multi-view dropdown
+    lands in the frontend. DATASET_PATH is the parent dir containing the
+    legacy/side_view/underbelly/wheel_shelling sibling folders - see
+    routers/dataset.py's DATASET_VIEWS."""
+    from pathlib import Path
+
     from app.services.dataset_service import DatasetNotFoundError, get_dataset_service
 
+    legacy_path = Path(settings.dataset_path) / "legacy"
     try:
-        info = get_dataset_service().load_dataset(settings.dataset_path)
+        info = get_dataset_service().load_dataset(str(legacy_path))
         logger.info("Auto-loaded dataset at %s (%d images)", info.dataset_path, info.total_images)
     except DatasetNotFoundError as exc:
         logger.warning("Skipping dataset auto-load: %s", exc)

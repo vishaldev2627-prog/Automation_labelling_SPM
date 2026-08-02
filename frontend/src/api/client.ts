@@ -4,6 +4,7 @@ import type {
   BatchJobStatus,
   ClassInfo,
   DatasetInfo,
+  DatasetView,
   DetectorInfo,
   DetectorTrainJobStatus,
   GenerateMaskResponse,
@@ -12,7 +13,23 @@ import type {
   Point,
 } from "../types";
 
+const SESSION_ID_KEY = "railway-annotator:session-id";
+
+function getOrCreateSessionId(): string {
+  let id = localStorage.getItem(SESSION_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(SESSION_ID_KEY, id);
+  }
+  return id;
+}
+
 const api = axios.create({ baseURL: "/api", timeout: 60_000 });
+// Lets the backend keep a separate "currently loaded dataset view" per
+// browser tab/session instead of one shared global (see backend's
+// app/session_context.py) - required for the side_view/underbelly/
+// wheel_shelling dataset switcher to work correctly with concurrent users.
+api.defaults.headers.common["X-Session-Id"] = getOrCreateSessionId();
 
 export const DatasetAPI = {
   load: (datasetPath: string) => api.post<DatasetInfo>("/dataset/load", { dataset_path: datasetPath }).then((r) => r.data),
@@ -21,6 +38,8 @@ export const DatasetAPI = {
   setClassColor: (classId: number, color: string) =>
     api.put(`/dataset/classes/${classId}/color`, { color }).then((r) => r.data),
   addClass: (name: string) => api.post<ClassInfo>("/dataset/classes", { name }).then((r) => r.data),
+  views: () => api.get<DatasetView[]>("/dataset/views").then((r) => r.data),
+  switchView: (view: string) => api.post<DatasetInfo>("/dataset/switch", { view }).then((r) => r.data),
 };
 
 export const ImagesAPI = {

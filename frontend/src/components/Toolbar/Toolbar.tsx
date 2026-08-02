@@ -15,9 +15,31 @@ const TOOLS: { mode: ToolMode; label: string; icon: string }[] = [
 ];
 
 export default function Toolbar() {
-  const { images, currentIndex, next, prev, setCurrentIndex, info, refreshInfo, refreshImages, markImageCompleted } =
-    useDatasetStore();
+  const {
+    images,
+    currentIndex,
+    next,
+    prev,
+    setCurrentIndex,
+    info,
+    refreshInfo,
+    refreshImages,
+    markImageCompleted,
+    views,
+    currentView,
+    switchView,
+    loading: datasetLoading,
+  } = useDatasetStore();
   const [frameInput, setFrameInput] = useState("");
+
+  const handleViewChange = (view: string) => {
+    if (view === currentView) return;
+    toast.promise(switchView(view), {
+      loading: `Switching to ${views.find((v) => v.key === view)?.label ?? view}...`,
+      success: (info) => `Loaded ${info.total_images} images`,
+      error: "Failed to switch dataset view",
+    });
+  };
 
   const goToFrame = () => {
     const n = parseInt(frameInput, 10);
@@ -163,6 +185,25 @@ export default function Toolbar() {
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-surface-700 bg-surface-900 px-3 py-2">
+      {views.length > 0 && (
+        <>
+          <select
+            value={currentView ?? ""}
+            onChange={(e) => handleViewChange(e.target.value)}
+            disabled={datasetLoading}
+            className="rounded border border-surface-600 bg-surface-800 px-2 py-1 text-sm text-gray-200"
+            title="Switch dataset view"
+          >
+            {views.map((v) => (
+              <option key={v.key} value={v.key}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+          <div className="mx-2 h-6 w-px bg-surface-600" />
+        </>
+      )}
+
       <div className="flex items-center gap-1">
         <button className="toolbar-btn" onClick={prev} disabled={currentIndex <= 0} title="Previous (←)">
           ◀

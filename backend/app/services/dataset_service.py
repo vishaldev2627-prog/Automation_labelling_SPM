@@ -319,16 +319,16 @@ class DatasetService:
         return self._images_dir
 
 
-_dataset_service: Optional[DatasetService] = None
-_ds_lock = threading.Lock()
-
-
 def get_dataset_service() -> DatasetService:
-    global _dataset_service
-    if _dataset_service is None:
-        with _ds_lock:
-            if _dataset_service is None:
+    """Return the DatasetService for the current request's session (see
+    app.session_context) - each session gets its own, lazily built on first use."""
+    from app.session_context import get_session_bundle
+
+    bundle = get_session_bundle()
+    if bundle.dataset_service is None:
+        with bundle.lock:
+            if bundle.dataset_service is None:
                 from app.config import get_settings
 
-                _dataset_service = DatasetService(get_settings())
-    return _dataset_service
+                bundle.dataset_service = DatasetService(get_settings())
+    return bundle.dataset_service

@@ -10,34 +10,48 @@ import { useAnnotationStore } from "./store/annotationStore";
 import { useDatasetStore } from "./store/datasetStore";
 
 const LAST_DATASET_KEY = "railway-annotator:last-dataset-path";
+const LAST_VIEW_KEY = "railway-annotator:last-dataset-view";
 
 export default function App() {
-  const { info, images, currentIndex, loadDataset, loadCurrent } = useDatasetStore();
+  const { info, images, currentIndex, currentView, loadDataset, loadCurrent, loadViews, switchView } =
+    useDatasetStore();
   const loadImage = useAnnotationStore((s) => s.loadImage);
   const imageLoading = useAnnotationStore((s) => s.loading);
   const generatingAll = useAnnotationStore((s) => s.generatingAll);
 
   useKeyboardShortcuts();
 
-  // The backend auto-loads its configured dataset on boot (see
-  // app.main.auto_load_dataset), so every visitor should land on it
-  // directly. Fall back to the last dataset this browser opened, then to
-  // the manual picker, only if the backend has nothing loaded yet.
+  // Each browser tab/session has its own currently-loaded dataset view on
+  // the backend (see api/client.ts's X-Session-Id header), so a brand-new
+  // session never has anything loaded yet - unlike before, when the
+  // backend's single auto-loaded dataset was shared by everyone. Restore,
+  // in order: this session's own last-used view, this browser's last raw
+  // dataset path (legacy manual-path flow), or default to the "legacy"
+  // view; only fall to the manual picker if all of those fail.
   useEffect(() => {
+    loadViews().catch(() => {
+      /* view list unavailable; dropdown just won't show options */
+    });
     loadCurrent().then((current) => {
       if (current) return;
+      const lastView = localStorage.getItem(LAST_VIEW_KEY);
       const lastPath = localStorage.getItem(LAST_DATASET_KEY);
       if (lastPath) {
         loadDataset(lastPath).catch(() => {
           /* dataset may have moved; user can load manually */
         });
+        return;
       }
+      switchView(lastView || "legacy").catch(() => {
+        /* no views configured yet; user can load manually */
+      });
     });
-  }, [loadDataset, loadCurrent]);
+  }, [loadDataset, loadCurrent, loadViews, switchView]);
 
   useEffect(() => {
     if (info) localStorage.setItem(LAST_DATASET_KEY, info.dataset_path);
-  }, [info]);
+    if (currentView) localStorage.setItem(LAST_VIEW_KEY, currentView);
+  }, [info, currentView]);
 
   useEffect(() => {
     const current = images[currentIndex];

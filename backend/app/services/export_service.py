@@ -33,6 +33,9 @@ class ExportService:
     def export(self, request: ExportRequest) -> dict:
         self._ds.require_loaded()
         image_ids = request.image_ids or self._ds.image_ids()
+        exports_dir = (
+            self._exports_dir / request.output_subdir if request.output_subdir else self._exports_dir
+        )
 
         exportable: list[tuple[str, list[tuple[int, list]]]] = []
         skipped = 0
@@ -59,8 +62,8 @@ class ExportService:
         exported = 0
         for image_id, objects in exportable:
             split = "train" if force_train else self._split_for(image_id)
-            out_images = self._exports_dir / "images" / split
-            out_labels = self._exports_dir / "labels" / split
+            out_images = exports_dir / "images" / split
+            out_labels = exports_dir / "labels" / split
             out_images.mkdir(parents=True, exist_ok=True)
             out_labels.mkdir(parents=True, exist_ok=True)
 
@@ -75,18 +78,18 @@ class ExportService:
             exported += 1
 
         class_names = [c.name for c in self._ds.get_classes()]
-        classes_file = self._exports_dir / "classes.txt"
+        classes_file = exports_dir / "classes.txt"
         classes_file.write_text("\n".join(class_names) + "\n", encoding="utf-8")
 
         data_yaml = {
-            "path": str(self._exports_dir.resolve()),
+            "path": str(exports_dir.resolve()),
             "train": "images/train",
-            "val": "images/val" if (self._exports_dir / "images" / "val").exists() else "images/train",
+            "val": "images/val" if (exports_dir / "images" / "val").exists() else "images/train",
             "names": {i: name for i, name in enumerate(class_names)},
         }
-        (self._exports_dir / "data.yaml").write_text(
+        (exports_dir / "data.yaml").write_text(
             yaml.safe_dump(data_yaml, sort_keys=False, allow_unicode=True), encoding="utf-8"
         )
 
         logger.info("Export complete: %d exported, %d skipped", exported, skipped)
-        return {"exported": exported, "skipped": skipped, "output_dir": str(self._exports_dir)}
+        return {"exported": exported, "skipped": skipped, "output_dir": str(exports_dir)}

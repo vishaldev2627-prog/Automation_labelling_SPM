@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { DatasetAPI, ImagesAPI } from "../api/client";
-import type { ClassInfo, DatasetInfo, ImageListItem } from "../types";
+import type { ClassInfo, DatasetInfo, DatasetView, ImageListItem } from "../types";
 
 interface DatasetState {
   datasetPath: string;
@@ -10,9 +10,13 @@ interface DatasetState {
   currentIndex: number;
   loading: boolean;
   error: string | null;
+  views: DatasetView[];
+  currentView: string | null;
 
   loadDataset: (path: string) => Promise<DatasetInfo>;
   loadCurrent: () => Promise<DatasetInfo | null>;
+  loadViews: () => Promise<DatasetView[]>;
+  switchView: (view: string) => Promise<DatasetInfo>;
   refreshInfo: () => Promise<void>;
   refreshImages: () => Promise<void>;
   setCurrentIndex: (index: number) => void;
@@ -24,6 +28,14 @@ interface DatasetState {
   markImageCompleted: (imageId: string, completed: boolean) => void;
 }
 
+// Dataset views live as sibling subfolders of the dataset root (see backend's
+// routers/dataset.py DATASET_VIEWS), so the view key is just the last path
+// segment of whatever dataset_path the backend reports.
+function viewKeyFromPath(path: string): string | null {
+  const segments = path.split("/").filter(Boolean);
+  return segments.length ? segments[segments.length - 1] : null;
+}
+
 export const useDatasetStore = create<DatasetState>((set, get) => ({
   datasetPath: "",
   info: null,
@@ -32,13 +44,23 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
   currentIndex: 0,
   loading: false,
   error: null,
+  views: [],
+  currentView: null,
 
   loadDataset: async (path: string) => {
     set({ loading: true, error: null });
     try {
       const info = await DatasetAPI.load(path);
       const [images, classes] = await Promise.all([ImagesAPI.list(), DatasetAPI.classes()]);
-      set({ datasetPath: path, info, images, classes, currentIndex: 0, loading: false });
+      set({
+        datasetPath: path,
+        info,
+        images,
+        classes,
+        currentIndex: 0,
+        loading: false,
+        currentView: viewKeyFromPath(info.dataset_path),
+      });
       return info;
     } catch (err: any) {
       set({ loading: false, error: err?.response?.data?.detail ?? err.message ?? "Failed to load dataset" });
@@ -50,10 +72,44 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
     try {
       const info = await DatasetAPI.info();
       const [images, classes] = await Promise.all([ImagesAPI.list(), DatasetAPI.classes()]);
-      set({ datasetPath: info.dataset_path, info, images, classes, currentIndex: 0 });
+      set({
+        datasetPath: info.dataset_path,
+        info,
+        images,
+        classes,
+        currentIndex: 0,
+        currentView: viewKeyFromPath(info.dataset_path),
+      });
       return info;
     } catch {
       return null;
+    }
+  },
+
+  loadViews: async () => {
+    const views = await DatasetAPI.views();
+    set({ views });
+    return views;
+  },
+
+  switchView: async (view: string) => {
+    set({ loading: true, error: null });
+    try {
+      const info = await DatasetAPI.switchView(view);
+      const [images, classes] = await Promise.all([ImagesAPI.list(), DatasetAPI.classes()]);
+      set({
+        datasetPath: info.dataset_path,
+        info,
+        images,
+        classes,
+        currentIndex: 0,
+        loading: false,
+        currentView: view,
+      });
+      return info;
+    } catch (err: any) {
+      set({ loading: false, error: err?.response?.data?.detail ?? err.message ?? "Failed to switch dataset view" });
+      throw err;
     }
   },
 

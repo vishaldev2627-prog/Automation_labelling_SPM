@@ -2,14 +2,53 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from app.models.schemas import ClassInfo, DatasetInfo
+from app.config import get_settings
+from app.models.schemas import ClassInfo, DatasetInfo, DatasetView
 from app.services.dataset_service import DatasetNotFoundError, get_dataset_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dataset", tags=["dataset"])
+
+# Fixed set of "dataset views" - independent dataset roots (own images/
+# labels/.annotation_state/data.yaml each) living as sibling subfolders under
+# the configured DATASET_PATH. "legacy" is the pre-existing flat dataset,
+# untouched; the other three are the split-by-camera-angle views.
+DATASET_VIEWS = [
+    DatasetView(key="legacy", label="Legacy (unsorted)"),
+    DatasetView(key="side_view", label="Side View"),
+    DatasetView(key="underbelly", label="Underbelly"),
+    DatasetView(key="wheel_shelling", label="Wheel Shelling"),
+]
+_VIEW_KEYS = {v.key for v in DATASET_VIEWS}
+
+
+@router.get("/views", response_model=list[DatasetView])
+def list_dataset_views() -> list[DatasetView]:
+    return DATASET_VIEWS
+
+
+@router.post("/switch", response_model=DatasetInfo)
+def switch_dataset_view(payload: dict) -> DatasetInfo:
+    """Load one of the fixed DATASET_VIEWS for the current session only (see
+    app.session_context) - other sessions' active dataset are unaffected."""
+    view = payload.get("view")
+    if view not in _VIEW_KEYS:
+        raise HTTPException(status_code=422, detail=f"Unknown view '{view}'. Valid: {sorted(_VIEW_KEYS)}")
+
+    base = Path(get_settings().dataset_path)
+    try:
+        info = get_dataset_service().load_dataset(str(base / view))
+    except DatasetNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    from app.services.similarity_service import get_similarity_service
+
+    get_similarity_service().start_reindex()
+    return info
 
 
 @router.post("/load", response_model=DatasetInfo)

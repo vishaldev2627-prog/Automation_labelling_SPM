@@ -61,6 +61,11 @@ export interface ClassInfo {
   color: string;
 }
 
+export interface DatasetView {
+  key: string;
+  label: string;
+}
+
 export interface BatchJobStatus {
   job_id: string;
   total: number;

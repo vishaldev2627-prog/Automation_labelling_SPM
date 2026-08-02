@@ -89,21 +89,21 @@ class BatchService:
         return list(self._jobs.values())
 
 
-_batch_service: Optional[BatchService] = None
-_lock = threading.Lock()
-
-
 def get_batch_service() -> BatchService:
-    global _batch_service
-    if _batch_service is None:
-        with _lock:
-            if _batch_service is None:
+    """Session-scoped (see app.session_context) - a batch job started while
+    one dataset view is active stays scoped to that session/view."""
+    from app.session_context import get_session_bundle
+
+    bundle = get_session_bundle()
+    if bundle.batch_service is None:
+        with bundle.lock:
+            if bundle.batch_service is None:
                 from app.config import get_settings
                 from app.services.dataset_service import get_dataset_service
                 from app.services.mask_generation_service import get_mask_generation_service
 
                 settings = get_settings()
-                _batch_service = BatchService(
+                bundle.batch_service = BatchService(
                     get_dataset_service(), get_mask_generation_service(), max_workers=settings.batch_max_workers
                 )
-    return _batch_service
+    return bundle.batch_service

@@ -110,6 +110,11 @@ class DatasetInfo(BaseModel):
     estimated_seconds_remaining: Optional[float] = None
 
 
+class DatasetView(BaseModel):
+    key: str
+    label: str
+
+
 class ImageListItem(BaseModel):
     image_id: str
     file_name: str
@@ -142,6 +147,7 @@ class BatchJobStatus(BaseModel):
 class ExportRequest(BaseModel):
     image_ids: list[str] = Field(default_factory=list)
     only_completed: bool = True
+    output_subdir: Optional[str] = None
 
 
 class DetectorTrainJobStatus(BaseModel):

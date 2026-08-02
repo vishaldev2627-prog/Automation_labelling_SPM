@@ -259,18 +259,18 @@ class DetectorService:
         return detections
 
 
-_detector_service: Optional[DetectorService] = None
-_lock = threading.Lock()
-
-
 def get_detector_service() -> DetectorService:
-    global _detector_service
-    if _detector_service is None:
-        with _lock:
-            if _detector_service is None:
+    """Session-scoped (see app.session_context) - a detector trained/active
+    while one dataset view is loaded stays scoped to that session/view."""
+    from app.session_context import get_session_bundle
+
+    bundle = get_session_bundle()
+    if bundle.detector_service is None:
+        with bundle.lock:
+            if bundle.detector_service is None:
                 from app.config import get_settings
                 from app.services.dataset_service import get_dataset_service
 
                 settings = get_settings()
-                _detector_service = DetectorService(get_dataset_service(), settings.models_dir)
-    return _detector_service
+                bundle.detector_service = DetectorService(get_dataset_service(), settings.models_dir)
+    return bundle.detector_service

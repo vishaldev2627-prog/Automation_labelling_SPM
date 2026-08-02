@@ -237,16 +237,17 @@ class SimilarityService:
         return self._jobs.get(job_id)
 
 
-_similarity_service: Optional[SimilarityService] = None
-_lock = threading.Lock()
-
-
 def get_similarity_service() -> SimilarityService:
-    global _similarity_service
-    if _similarity_service is None:
-        with _lock:
-            if _similarity_service is None:
+    """Session-scoped (see app.session_context) - the similarity index is
+    built per dataset view, so it must live alongside that session's
+    DatasetService rather than be shared across every session/view."""
+    from app.session_context import get_session_bundle
+
+    bundle = get_session_bundle()
+    if bundle.similarity_service is None:
+        with bundle.lock:
+            if bundle.similarity_service is None:
                 from app.services.dataset_service import get_dataset_service
 
-                _similarity_service = SimilarityService(get_dataset_service())
-    return _similarity_service
+                bundle.similarity_service = SimilarityService(get_dataset_service())
+    return bundle.similarity_service

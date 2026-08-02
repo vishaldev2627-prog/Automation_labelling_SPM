@@ -15,9 +15,7 @@ Only ever writes into images no human has reviewed yet (see
 from __future__ import annotations
 
 import logging
-import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
 
 from app.config import Settings
 from app.models.schemas import AnnotationObject, ImageAnnotations, ObjectSource, ObjectStatus
@@ -134,24 +132,24 @@ class PropagationService:
         logger.info("Propagated %d object(s) from %s onto %s", len(new_objects), source_id, target_id)
 
 
-_propagation_service: Optional[PropagationService] = None
-_lock = threading.Lock()
-
-
 def get_propagation_service() -> PropagationService:
-    global _propagation_service
-    if _propagation_service is None:
-        with _lock:
-            if _propagation_service is None:
+    """Session-scoped (see app.session_context) - propagation only ever runs
+    against near-duplicates within the same session's currently-loaded dataset."""
+    from app.session_context import get_session_bundle
+
+    bundle = get_session_bundle()
+    if bundle.propagation_service is None:
+        with bundle.lock:
+            if bundle.propagation_service is None:
                 from app.config import get_settings
                 from app.services.dataset_service import get_dataset_service
                 from app.services.mask_generation_service import get_mask_generation_service
                 from app.services.similarity_service import get_similarity_service
 
-                _propagation_service = PropagationService(
+                bundle.propagation_service = PropagationService(
                     get_dataset_service(),
                     get_similarity_service(),
                     get_mask_generation_service(),
                     get_settings(),
                 )
-    return _propagation_service
+    return bundle.propagation_service

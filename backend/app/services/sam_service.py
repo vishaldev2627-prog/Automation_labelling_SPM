@@ -142,16 +142,19 @@ class SAMService:
         }
 
     # ------------------------------------------------------------ inference
+    def _set_image_locked(self, image_rgb: np.ndarray, cache_key: str) -> None:
+        """Compute (or reuse cached) image embeddings. Caller must hold self._lock."""
+        if self._current_image_key == cache_key:
+            return
+        self._predictor.set_image(image_rgb)
+        self._current_image_key = cache_key
+
     def set_image(self, image_rgb: np.ndarray, cache_key: str) -> None:
         """Compute (or reuse cached) image embeddings for the given image."""
         if not self.is_available:
             raise SAMNotAvailableError(self._init_error or "SAM model unavailable")
-
         with self._lock:
-            if self._current_image_key == cache_key:
-                return
-            self._predictor.set_image(image_rgb)
-            self._current_image_key = cache_key
+            self._set_image_locked(image_rgb, cache_key)
 
     def predict_box(
         self,
@@ -165,8 +168,6 @@ class SAMService:
         if not self.is_available:
             raise SAMNotAvailableError(self._init_error or "SAM model unavailable")
 
-        self.set_image(image_rgb, cache_key)
-
         point_coords = None
         point_labels = None
         pts = [(p[0], p[1], 1) for p in (positive_points or [])] + [
@@ -176,7 +177,14 @@ class SAMService:
             point_coords = np.array([[p[0], p[1]] for p in pts], dtype=np.float32)
             point_labels = np.array([p[2] for p in pts], dtype=np.int32)
 
+        # set_image + predict must be one atomic critical section: releasing the
+        # lock in between (as this used to do) let a concurrent request for a
+        # different image swap the predictor's cached embedding out from under
+        # this call before predict() ran, silently producing a mask for the
+        # wrong image. Single GPU anyway, so serializing the whole thing costs
+        # nothing extra in practice.
         with self._lock:
+            self._set_image_locked(image_rgb, cache_key)
             masks, scores, _ = self._predictor.predict(
                 point_coords=point_coords,
                 point_labels=point_labels,
@@ -195,13 +203,14 @@ class SAMService:
         """Run SAM2 with only click prompts (magic wand / refine mode)."""
         if not self.is_available:
             raise SAMNotAvailableError(self._init_error or "SAM model unavailable")
-        self.set_image(image_rgb, cache_key)
 
         pts = [(p[0], p[1], 1) for p in positive_points] + [(p[0], p[1], 0) for p in (negative_points or [])]
         point_coords = np.array([[p[0], p[1]] for p in pts], dtype=np.float32)
         point_labels = np.array([p[2] for p in pts], dtype=np.int32)
 
+        # See predict_box for why set_image + predict share one lock acquisition.
         with self._lock:
+            self._set_image_locked(image_rgb, cache_key)
             masks, scores, _ = self._predictor.predict(
                 point_coords=point_coords,
                 point_labels=point_labels,

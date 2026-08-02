@@ -111,18 +111,21 @@ class MaskGenerationService:
         return annotations
 
 
-_mask_service: Optional[MaskGenerationService] = None
-_lock = threading.Lock()
-
-
 def get_mask_generation_service() -> MaskGenerationService:
-    global _mask_service
-    if _mask_service is None:
-        with _lock:
-            if _mask_service is None:
+    """Session-scoped, like get_dataset_service() (see app.session_context) -
+    built against the current session's DatasetService, sharing the one
+    process-wide SAM2 model."""
+    from app.session_context import get_session_bundle
+
+    bundle = get_session_bundle()
+    if bundle.mask_generation_service is None:
+        with bundle.lock:
+            if bundle.mask_generation_service is None:
                 from app.config import get_settings
                 from app.services.dataset_service import get_dataset_service
                 from app.services.sam_service import get_sam_service
 
-                _mask_service = MaskGenerationService(get_dataset_service(), get_sam_service(), get_settings())
-    return _mask_service
+                bundle.mask_generation_service = MaskGenerationService(
+                    get_dataset_service(), get_sam_service(), get_settings()
+                )
+    return bundle.mask_generation_service
