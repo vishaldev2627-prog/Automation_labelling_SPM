@@ -24,12 +24,21 @@ function getOrCreateSessionId(): string {
   return id;
 }
 
+const sessionId = getOrCreateSessionId();
+
+// Set as a cookie, not just a header: plain <img src="..."> requests (how
+// AnnotationCanvas/ImagesAPI.fileUrl actually fetches image bytes) never
+// carry axios's default headers, only whatever the browser sends
+// automatically - a cookie is sent on every same-origin request regardless
+// of how it was initiated, so it's what makes the backend's per-session
+// dataset view (see app/session_context.py) apply consistently to both the
+// JSON API calls and the raw image loads.
+document.cookie = `session_id=${sessionId}; path=/; SameSite=Lax; max-age=31536000`;
+
 const api = axios.create({ baseURL: "/api", timeout: 60_000 });
-// Lets the backend keep a separate "currently loaded dataset view" per
-// browser tab/session instead of one shared global (see backend's
-// app/session_context.py) - required for the side_view/underbelly/
-// wheel_shelling dataset switcher to work correctly with concurrent users.
-api.defaults.headers.common["X-Session-Id"] = getOrCreateSessionId();
+// Kept alongside the cookie for any non-browser API consumers (scripts,
+// curl) that don't carry cookies but can set a header.
+api.defaults.headers.common["X-Session-Id"] = sessionId;
 
 export const DatasetAPI = {
   load: (datasetPath: string) => api.post<DatasetInfo>("/dataset/load", { dataset_path: datasetPath }).then((r) => r.data),

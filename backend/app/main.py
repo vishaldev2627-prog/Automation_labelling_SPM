@@ -34,10 +34,18 @@ app.add_middleware(
 async def session_context_middleware(request: Request, call_next):
     """Tag this request with its session id (see app.session_context) so
     get_dataset_service() and friends resolve to the right session's
-    currently-loaded dataset view instead of one shared global instance."""
+    currently-loaded dataset view instead of one shared global instance.
+
+    Read from the session_id cookie, not just the X-Session-Id header: plain
+    <img src="..."> requests (how the browser actually fetches image bytes)
+    never carry custom headers, only whatever axios/fetch calls set - but a
+    cookie is sent automatically on every same-origin request regardless of
+    how it was initiated, so it's the only mechanism that covers both.
+    """
     from app.session_context import set_current_session_id
 
-    set_current_session_id(request.headers.get("x-session-id"))
+    session_id = request.cookies.get("session_id") or request.headers.get("x-session-id")
+    set_current_session_id(session_id)
     return await call_next(request)
 
 app.include_router(dataset.router)
