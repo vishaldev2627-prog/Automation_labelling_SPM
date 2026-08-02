@@ -28,6 +28,7 @@ export default function Toolbar() {
     views,
     currentView,
     switchView,
+    reloadCurrent,
     loading: datasetLoading,
   } = useDatasetStore();
   const [frameInput, setFrameInput] = useState("");
@@ -38,6 +39,14 @@ export default function Toolbar() {
       loading: `Switching to ${views.find((v) => v.key === view)?.label ?? view}...`,
       success: (info) => `Loaded ${info.total_images} images`,
       error: "Failed to switch dataset view",
+    });
+  };
+
+  const handleReload = () => {
+    toast.promise(reloadCurrent(), {
+      loading: "Reloading dataset...",
+      success: (info) => `Reloaded — ${info.total_images} images`,
+      error: "Failed to reload dataset",
     });
   };
 
@@ -186,23 +195,29 @@ export default function Toolbar() {
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-surface-700 bg-surface-900 px-3 py-2">
       {views.length > 0 && (
-        <>
-          <select
-            value={currentView ?? ""}
-            onChange={(e) => handleViewChange(e.target.value)}
-            disabled={datasetLoading}
-            className="rounded border border-surface-600 bg-surface-800 px-2 py-1 text-sm text-gray-200"
-            title="Switch dataset view"
-          >
-            {views.map((v) => (
-              <option key={v.key} value={v.key}>
-                {v.label}
-              </option>
-            ))}
-          </select>
-          <div className="mx-2 h-6 w-px bg-surface-600" />
-        </>
+        <select
+          value={currentView ?? ""}
+          onChange={(e) => handleViewChange(e.target.value)}
+          disabled={datasetLoading}
+          className="rounded border border-surface-600 bg-surface-800 px-2 py-1 text-sm text-gray-200"
+          title="Switch dataset view"
+        >
+          {views.map((v) => (
+            <option key={v.key} value={v.key}>
+              {v.label}
+            </option>
+          ))}
+        </select>
       )}
+      <button
+        className="toolbar-btn"
+        onClick={handleReload}
+        disabled={datasetLoading}
+        title="Re-scan this dataset's images/labels folders from disk — use after adding or removing images"
+      >
+        🔄 Reload dataset
+      </button>
+      <div className="mx-2 h-6 w-px bg-surface-600" />
 
       <div className="flex items-center gap-1">
         <button className="toolbar-btn" onClick={prev} disabled={currentIndex <= 0} title="Previous (←)">

@@ -17,6 +17,7 @@ interface DatasetState {
   loadCurrent: () => Promise<DatasetInfo | null>;
   loadViews: () => Promise<DatasetView[]>;
   switchView: (view: string) => Promise<DatasetInfo>;
+  reloadCurrent: () => Promise<DatasetInfo>;
   refreshInfo: () => Promise<void>;
   refreshImages: () => Promise<void>;
   setCurrentIndex: (index: number) => void;
@@ -109,6 +110,35 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
       return info;
     } catch (err: any) {
       set({ loading: false, error: err?.response?.data?.detail ?? err.message ?? "Failed to switch dataset view" });
+      throw err;
+    }
+  },
+
+  // Re-scans the current view's images/labels folders from disk - the
+  // backend only does this on an actual load/switch call, never on its own,
+  // so newly added/removed image files won't show up until this (or a view
+  // switch) runs. Unlike switchView, this tries to keep you on the same
+  // image afterward instead of always jumping back to frame 1.
+  reloadCurrent: async () => {
+    const { images, currentIndex, currentView, datasetPath } = get();
+    const currentImageId = images[currentIndex]?.image_id;
+    set({ loading: true, error: null });
+    try {
+      const info = currentView ? await DatasetAPI.switchView(currentView) : await DatasetAPI.load(datasetPath);
+      const [newImages, classes] = await Promise.all([ImagesAPI.list(), DatasetAPI.classes()]);
+      const restoredIndex = currentImageId ? newImages.findIndex((i) => i.image_id === currentImageId) : -1;
+      set({
+        datasetPath: info.dataset_path,
+        info,
+        images: newImages,
+        classes,
+        currentIndex: restoredIndex >= 0 ? restoredIndex : 0,
+        loading: false,
+        currentView: currentView ?? viewKeyFromPath(info.dataset_path),
+      });
+      return info;
+    } catch (err: any) {
+      set({ loading: false, error: err?.response?.data?.detail ?? err.message ?? "Failed to reload dataset" });
       throw err;
     }
   },
