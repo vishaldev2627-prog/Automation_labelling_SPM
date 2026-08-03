@@ -29,6 +29,25 @@ from app.utils.yolo_utils import load_class_names, parse_detection_label_file
 
 logger = logging.getLogger(__name__)
 
+# Keyed by dataset root path rather than per-DatasetService-instance: with
+# per-session DatasetService (see app.session_context), two teammates working
+# on the same view each hold their own instance and their own self._lock, so
+# an instance-level lock does nothing to serialize their concurrent
+# add_class() calls against each other. This one is shared by anyone pointed
+# at the same folder.
+_class_list_locks: dict[str, threading.Lock] = {}
+_class_list_locks_guard = threading.Lock()
+
+
+def _get_class_list_lock(root: Path) -> threading.Lock:
+    key = str(root.resolve())
+    with _class_list_locks_guard:
+        lock = _class_list_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _class_list_locks[key] = lock
+        return lock
+
 DEFAULT_PALETTE = [
     "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4",
     "#46f0f0", "#f032e6", "#bcf60c", "#fabebe", "#008080", "#e6beff",
@@ -141,16 +160,28 @@ class DatasetService:
 
     def add_class(self, name: str) -> ClassInfo:
         """Add a new class the detector never saw, persisting it back to disk
-        (classes.txt or data.yaml) so it survives the next dataset reload."""
+        (classes.txt or data.yaml) so it survives the next dataset reload.
+
+        Re-reads the class list from disk under a lock shared across every
+        DatasetService instance pointed at this same folder (not just
+        self._lock, which only protects this one instance) - otherwise two
+        teammates in separate sessions each holding their own stale in-memory
+        copy would have the second add_class() wholesale overwrite data.yaml
+        with their own list, silently deleting whatever the first person just
+        added.
+        """
         self.require_loaded()
         name = name.strip()
         if not name:
             raise ValueError("Class name cannot be empty")
-        with self._lock:
-            if name in self._classes:
+        root = self._images_dir.parent
+        with _get_class_list_lock(root):
+            current = load_class_names(root)
+            if name in current:
                 raise ValueError(f"Class '{name}' already exists")
-            class_id = len(self._classes)
-            self._classes.append(name)
+            class_id = len(current)
+            current.append(name)
+            self._classes = current
             color = DEFAULT_PALETTE[class_id % len(DEFAULT_PALETTE)]
             self._colors[str(class_id)] = color
             self._save_meta()
