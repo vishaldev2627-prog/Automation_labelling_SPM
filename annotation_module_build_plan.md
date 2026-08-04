@@ -236,12 +236,17 @@ frames, then into training data, is a **safety** risk here, not a quality nuisan
 - Golden set must have **enough examples per safety-relevant class** (cracked wheel, shelling,
   crack/corrosion) to make a per-class promotion check statistically meaningful (pipeline R10).
 
-> **Bug found during testing, not yet fixed — flagged separately:** a save that triggers the
-> *first-ever* `get_propagation_service()` initialization in a running process can hang for an
-> extremely long time before returning a response, even though the underlying write completes
-> correctly (verified: DB state was correct while the HTTP response never arrived). Needs its own
-> investigation — likely a cold-start cost (model load) blocking the response path somewhere it
-> shouldn't. Pre-existing, not introduced by this phase's changes.
+> **✅ Bug found during Phase 4 testing — root-caused and fixed.** `SessionBundle.lock`
+> (`app/session_context.py`) was a plain non-reentrant `threading.Lock`. `get_propagation_service()`
+> acquires it, then — while still holding it — calls `get_similarity_service()` and
+> `get_mask_generation_service()`, each of which acquires the *same* lock again for their own
+> first-time construction. On the same request thread that's a self-deadlock, not a slow
+> operation: it hit whenever a save transitioned an image to `completed=True` for the first time
+> in a session where `mask_generation_service` hadn't been built yet — which a session's first
+> "save + mark completed" always is. Fixed by switching to `threading.RLock()`. Verified live:
+> the exact original trigger scenario (fresh session, first completion, mask service untouched)
+> previously hung 30+ minutes; now returns in 0.034s, with propagation still completing correctly
+> in the background afterward.
 
 ### Phase 5 — Dataset versioning & export → staged snapshot for MLflow `New — this is the versioning plan`
 
