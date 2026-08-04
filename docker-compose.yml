@@ -27,6 +27,36 @@ services:
       timeout: 5s
       retries: 10
 
+  minio:
+    image: minio/minio:latest
+    container_name: automation-minio-1
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    # MINIO_ROOT_USER/MINIO_ROOT_PASSWORD follow the same pattern as db's
+    # POSTGRES_USER/PASSWORD - deliberately NOT declared under `environment:`
+    # as ${VAR}-interpolated entries (Coolify doesn't feed its UI-configured
+    # vars into compose's own substitution pass, see the backend volumes
+    # comment below). They come from the env_file above for local dev; set
+    # them directly in this service's own Coolify Environment Variables tab
+    # in prod. Phase 5's dataset-snapshot staging store (see
+    # annotation_module_build_plan.md Q-C) - not the pre-existing
+    # vandebharat-minio-1 on this host, which belongs to a different project.
+    command: server /data --console-address ":9001"
+    ports:
+      # Host ports deliberately different from the pre-existing
+      # vandebharat-minio-1 (9010/9011) on this same host.
+      - "9022:9000"
+      - "9023:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: ./backend
@@ -108,3 +138,4 @@ services:
 volumes:
   logs_data:
   postgres_data:
+  minio_data:
