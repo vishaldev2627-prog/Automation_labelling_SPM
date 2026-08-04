@@ -9,6 +9,7 @@ embedding index there, which is unrelated to annotation state.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from pathlib import Path
@@ -52,6 +53,14 @@ def _get_class_list_lock(root: Path) -> threading.Lock:
             _class_list_locks[key] = lock
         return lock
 
+# Starting default for a brand-new class's safety_critical flag (never
+# overwrites an existing class's curator-set value - see
+# annotation_state_repo._upsert_class). An engineering guess based on the
+# plan's own language (§4.4: "cracked wheel, wheel shelling, undercarriage
+# crack/corrosion") and component families actually present in this
+# dataset, not a certified list - a domain expert should review it.
+SAFETY_KEYWORD_PATTERN = re.compile(r"(wheel|brake|axle|suspension|disc|spring|crack|corrosion|shelling)", re.IGNORECASE)
+
 DEFAULT_PALETTE = [
     "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4",
     "#46f0f0", "#f032e6", "#bcf60c", "#fabebe", "#008080", "#e6beff",
@@ -82,6 +91,7 @@ class DatasetService:
         self._index: dict[str, Path] = {}  # image_id -> image path
         self._classes: list[str] = []
         self._colors: dict[str, str] = {}
+        self._safety: dict[str, bool] = {}
         self._loaded = False
 
     # ------------------------------------------------------------- loading
@@ -145,13 +155,26 @@ class DatasetService:
                 if key not in colors:
                     colors[key] = DEFAULT_PALETTE[i % len(DEFAULT_PALETTE)]
             self._colors = colors
-            state_repo.save_colors_bulk(db, self._dataset_key, self._classes, self._colors)
+            self._safety = state_repo.get_safety_flags(db, self._dataset_key)
+            default_safety = {
+                str(i): bool(SAFETY_KEYWORD_PATTERN.search(name)) for i, name in enumerate(self._classes)
+            }
+            state_repo.save_colors_bulk(db, self._dataset_key, self._classes, self._colors, default_safety)
+            # Re-read: save_colors_bulk only applies default_safety to
+            # brand-new rows, so this picks up the value that actually
+            # landed (curator's existing choice, or the new default).
+            self._safety = state_repo.get_safety_flags(db, self._dataset_key)
         finally:
             db.close()
 
     def get_classes(self) -> list[ClassInfo]:
         return [
-            ClassInfo(class_id=i, name=name, color=self._colors.get(str(i), DEFAULT_PALETTE[i % len(DEFAULT_PALETTE)]))
+            ClassInfo(
+                class_id=i,
+                name=name,
+                color=self._colors.get(str(i), DEFAULT_PALETTE[i % len(DEFAULT_PALETTE)]),
+                safety_critical=self._safety.get(str(i), False),
+            )
             for i, name in enumerate(self._classes)
         ]
 
@@ -164,6 +187,17 @@ class DatasetService:
                 state_repo.set_class_color(db, self._dataset_key, class_id, name, color)
             finally:
                 db.close()
+
+    def set_class_safety_critical(self, class_id: int, safety_critical: bool) -> None:
+        with self._lock:
+            db = SessionLocal()
+            try:
+                found = state_repo.set_class_safety_critical(db, self._dataset_key, class_id, safety_critical)
+            finally:
+                db.close()
+            if not found:
+                raise ValueError(f"No class {class_id} in this dataset view")
+            self._safety[str(class_id)] = safety_critical
 
     def add_class(self, name: str) -> ClassInfo:
         """Add a new class the detector never saw, persisting it back to disk
@@ -191,13 +225,17 @@ class DatasetService:
             self._classes = current
             color = DEFAULT_PALETTE[class_id % len(DEFAULT_PALETTE)]
             self._colors[str(class_id)] = color
+            safety_critical = bool(SAFETY_KEYWORD_PATTERN.search(name))
             db = SessionLocal()
             try:
-                state_repo.save_colors_bulk(db, self._dataset_key, self._classes, self._colors)
+                state_repo.save_colors_bulk(
+                    db, self._dataset_key, self._classes, self._colors, {str(class_id): safety_critical}
+                )
             finally:
                 db.close()
+            self._safety[str(class_id)] = safety_critical
             self._persist_class_names()
-            return ClassInfo(class_id=class_id, name=name, color=color)
+            return ClassInfo(class_id=class_id, name=name, color=color, safety_critical=safety_critical)
 
     def _persist_class_names(self) -> None:
         """Write the current class list back to whichever file the dataset

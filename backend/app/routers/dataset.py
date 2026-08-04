@@ -87,6 +87,20 @@ def set_class_color(class_id: int, payload: dict) -> dict:
     return {"class_id": class_id, "color": color}
 
 
+@router.put("/classes/{class_id}/safety-critical")
+def set_class_safety_critical(class_id: int, payload: dict) -> dict:
+    safety_critical = payload.get("safety_critical")
+    if not isinstance(safety_critical, bool):
+        raise HTTPException(status_code=422, detail="safety_critical (boolean) is required")
+    try:
+        get_dataset_service().set_class_safety_critical(class_id, safety_critical)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DatasetNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"class_id": class_id, "safety_critical": safety_critical}
+
+
 @router.post("/classes", response_model=ClassInfo)
 def add_class(payload: dict) -> ClassInfo:
     name = (payload.get("name") or "").strip()

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -93,25 +93,59 @@ def get_colors(db: Session, dataset_key: str) -> dict[str, str]:
     return {str(class_id): color for class_id, color in rows}
 
 
-def save_colors_bulk(db: Session, dataset_key: str, classes: list[str], colors: dict[str, str]) -> None:
+def get_safety_flags(db: Session, dataset_key: str) -> dict[str, bool]:
+    rows = db.execute(
+        select(DatasetClass.class_id, DatasetClass.safety_critical).where(DatasetClass.dataset_view == dataset_key)
+    ).all()
+    return {str(class_id): flag for class_id, flag in rows}
+
+
+def set_class_safety_critical(db: Session, dataset_key: str, class_id: int, safety_critical: bool) -> bool:
+    """Returns False if no row exists yet for this class (dataset never
+    loaded far enough to sync it) - caller should treat that as not found,
+    not silently succeed."""
+    result = db.execute(
+        update(DatasetClass)
+        .where(DatasetClass.dataset_view == dataset_key, DatasetClass.class_id == class_id)
+        .values(safety_critical=safety_critical)
+    )
+    db.commit()
+    return result.rowcount > 0
+
+
+def save_colors_bulk(
+    db: Session, dataset_key: str, classes: list[str], colors: dict[str, str], default_safety: dict[str, bool]
+) -> None:
     """Upsert one row per (dataset_key, class_id) - mirrors the old
     `_save_meta()` full-rewrite, just as N upserts instead of one file write.
-    N is the class count (tens, not thousands), so this is cheap."""
+    N is the class count (tens, not thousands), so this is cheap.
+
+    `default_safety` only takes effect for a class_id that doesn't already
+    have a row (see _upsert_class) - it never overwrites a curator's
+    existing safety_critical choice on an already-known class.
+    """
     for class_id, name in enumerate(classes):
         color = colors.get(str(class_id))
         if color is None:
             continue
-        _upsert_class(db, dataset_key, class_id, name, color)
+        _upsert_class(db, dataset_key, class_id, name, color, default_safety.get(str(class_id), False))
     db.commit()
 
 
 def set_class_color(db: Session, dataset_key: str, class_id: int, name: str, color: str) -> None:
-    _upsert_class(db, dataset_key, class_id, name, color)
+    _upsert_class(db, dataset_key, class_id, name, color, safety_critical_if_new=False)
     db.commit()
 
 
-def _upsert_class(db: Session, dataset_key: str, class_id: int, name: str, color: str) -> None:
-    stmt = insert(DatasetClass).values(dataset_view=dataset_key, class_id=class_id, name=name, color=color)
+def _upsert_class(
+    db: Session, dataset_key: str, class_id: int, name: str, color: str, safety_critical_if_new: bool
+) -> None:
+    stmt = insert(DatasetClass).values(
+        dataset_view=dataset_key, class_id=class_id, name=name, color=color, safety_critical=safety_critical_if_new
+    )
+    # safety_critical deliberately excluded from set_= : ON CONFLICT (an
+    # existing class) never touches it, only a brand-new row gets
+    # safety_critical_if_new - preserves whatever a curator already set.
     stmt = stmt.on_conflict_do_update(
         constraint="uq_dataset_classes_view_class",
         set_={"name": stmt.excluded.name, "color": stmt.excluded.color},

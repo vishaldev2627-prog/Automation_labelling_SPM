@@ -127,6 +127,7 @@ class ClassInfo(BaseModel):
     class_id: int
     name: str
     color: str
+    safety_critical: bool = False
 
 
 class BatchProcessRequest(BaseModel):

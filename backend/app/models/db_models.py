@@ -153,7 +153,16 @@ class DatasetClass(Base):
     """One class definition (id/name/color) for one dataset view - replaces
     `_meta.json`'s {"classes": [...], "colors": {...}} and is the DB source
     of truth `add_class()` writes through to classes.txt/data.yaml for YOLO
-    export compatibility (dataset_service._persist_class_names, unchanged)."""
+    export compatibility (dataset_service._persist_class_names, unchanged).
+
+    `safety_critical` gates auto_accept_service.py: a safety-critical class
+    never auto-accepts regardless of confidence or audit track record -
+    always a human, always a second reviewer (plan §4.4). Seeded with a
+    keyword-based default (wheel/brake/axle/suspension/disc/spring/crack/
+    corrosion/shelling) by the migration that adds this column - an
+    engineering starting point for a domain expert to review and correct,
+    not a certified list. Editable per-class via the API/UI.
+    """
 
     __tablename__ = "dataset_classes"
     __table_args__ = (UniqueConstraint("dataset_view", "class_id", name="uq_dataset_classes_view_class"),)
@@ -163,3 +172,4 @@ class DatasetClass(Base):
     class_id: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     color: Mapped[str] = mapped_column(String, nullable=False)
+    safety_critical: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
