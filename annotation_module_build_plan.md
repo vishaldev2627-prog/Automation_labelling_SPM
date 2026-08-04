@@ -478,15 +478,21 @@ plan's descriptions are accurate; confirm the real code first (Q-A) or Phase 1 s
   its write paths can check this role from day one. **Still open:** who (named domain experts,
   by name) actually does the curation — that's a people/process answer, not something a role
   field resolves on its own; still waiting on the pipeline team.
-- **Q-E — Return-path format — partially scoped.** In what form does the pipeline emit low-conf /
+- **Q-E — Return-path format — mostly scoped.** In what form does the pipeline emit low-conf /
   field-flagged / gate-recall-audit misses back for triage (pipeline §7/§12, R6)? Defines the
   Phase 2 / Phase 7 contract. **Position fields (`longitudinal_position_mm` etc.) explicitly not
   calculated locally** — those come from physical encoder counts (pipeline §4), not camera
   optics, and no real calibration constants exist in this repo to compute them from safely (see
   §5 risk "Spine-stamp loss breaks pipeline fusion" — fabricating this would be worse than
-  leaving it blank). **Still open, sent to pipeline team:** the wire format itself (webhook vs.
-  polling endpoint vs. queue vs. file drop) and whether it shares the Q-F bogie-batch channel or
-  is a separate higher-priority path.
+  leaving it blank).
+  **✅ Wire format decided: same channel as Q-F, not a separate path.** Field-flagged and
+  gate-recall-audit-miss frames ride the same bogie-batched ingestion intake as routine frames
+  (Q-F), just tagged within the batch (e.g. a priority/reason field per frame) rather than a
+  second polling endpoint or push channel. One ingestion contract to build and keep in sync, not
+  two. Phase 1b's ingestion endpoint design should carry this tag through to Phase 2's tier-1
+  triage bucket. **Still open, sent to pipeline team:** the actual per-frame payload shape/schema
+  for the flag itself (reason code, source, timestamp format, etc.) — the *channel* is settled,
+  the *payload* isn't.
 - **✅ Q-F — Frame arrival model — RESOLVED: discrete batches, one per bogie.** Not a continuous
   stream — each bogie's frames arrive as one complete batch. This bounds the ingestion
   endpoint's back-pressure design: size the intake/queue around "one bogie's worth of frames,"
