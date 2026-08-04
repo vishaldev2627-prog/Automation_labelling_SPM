@@ -256,6 +256,33 @@ frames, then into training data, is a **safety** risk here, not a quality nuisan
 > previously hung 30+ minutes; now returns in 0.034s, with propagation still completing correctly
 > in the background afterward.
 
+**✅ Confidence-based auto-accept — shipped (not originally scoped; added to answer a real
+volume problem).** A coach can carry ~700-800 frames; annotating every one by hand doesn't
+scale for the team. Directly extends §4.3's auto-accept curve with a conservative, product-
+approved gate:
+- `safety_critical` flag per class (seeded via keyword heuristic on migration, curator-editable
+  in the UI) — a safety-critical class is **never** eligible, full stop, regardless of confidence
+  or audit history.
+- A class only becomes eligible after `review_service.get_class_audit_stats()` shows **≥ 10
+  audit_sample reviews at 100% approval** — measured accuracy, not a guess (§4.3's own words).
+  Conservative by explicit product decision over "aggressive."
+- Eligible + ≥ 95% confidence + all-or-nothing per image (one weak object anywhere in the frame
+  keeps the whole image in the human queue) → `GET /api/auto-accept/candidates` (preview only)
+  → explicit `POST /api/auto-accept/execute` (never automatic/silent) → completion attributed to
+  a reserved `System (auto-accept)` identity, with its own approving review so it's immediately
+  export-eligible.
+- Frontend: a ⚠ toggle per class in `ClassPanel`, and an "Auto-accept" tab + "Accept all N
+  frames" button in `QueuePanel`.
+
+Verified end-to-end on an isolated synthetic dataset (not real data): a class crossed the
+eligibility bar only after reaching 10/10 approved audits; a safety-critical class stayed
+ineligible even after also reaching a perfect 10/10 record; low-confidence objects were
+correctly excluded; a live browser click-through confirmed the whole loop from "0 candidates"
+to "1 candidate" to "accepted, export-eligible, reviewed by System (auto-accept)" with no page
+reload. Two real bugs found and fixed during this verification: the ⚠ emoji ignores CSS color
+(fixed via conditional opacity instead), and `ReviewActions` didn't refresh on a `completed`
+flip that wasn't accompanied by a navigation.
+
 ### Phase 5 — Dataset versioning & export → staged snapshot for MLflow `New — this is the versioning plan`
 
 `export_service.py` already writes clean YOLO-seg datasets with a deterministic train/val
