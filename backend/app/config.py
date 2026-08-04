@@ -52,6 +52,20 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_file: str = "../logs/backend.log"
 
+    # Postgres (annotation state / audit history - see app/db.py)
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_user: str = "annotator"
+    postgres_password: str = "change-me"
+    postgres_db: str = "annotator"
+
+    @property
+    def database_url(self) -> str:
+        return (
+            f"postgresql+psycopg://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
+
     @property
     def dataset_dir(self) -> Path:
         return Path(self.dataset_path).resolve()

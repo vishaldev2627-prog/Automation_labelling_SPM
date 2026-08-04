@@ -1,9 +1,40 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: railway-annotator-db
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # POSTGRES_USER/PASSWORD/DB are deliberately NOT declared here as
+      # ${VAR}-interpolated entries - see the backend volumes comment below
+      # for why (Coolify doesn't feed its UI-configured vars into compose's
+      # own substitution pass). For local dev they come from the env_file
+      # above; under Coolify, set them directly in this service's own
+      # Environment Variables tab. The backend service needs the *same*
+      # values set independently on its own Coolify service config (see its
+      # POSTGRES_* vars below) since each service's env is injected separately.
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # No -U/-d flags: pg_isready just checks that the postmaster is
+      # accepting connections, which doesn't require a valid role - keeps
+      # this independent of whatever POSTGRES_USER ends up being.
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: ./backend
     container_name: railway-annotator-backend
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     env_file:
       - path: .env
         required: false
@@ -25,6 +56,13 @@ services:
       - MODELS_PATH=/data/models
       - SAM_CHECKPOINT=/data/models/sam2.1_hiera_large.pt
       - SAM_MODEL_CFG=configs/sam2.1/sam2.1_hiera_l.yaml
+      # POSTGRES_HOST/PORT are the compose service DNS name + default port -
+      # not secret, safe to hardcode like the paths above. POSTGRES_USER/
+      # PASSWORD/DB are NOT hardcoded here: they come from the env_file for
+      # local dev, and must be set directly (matching the db service's own
+      # values) in this service's Coolify Environment Variables tab in prod.
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
     # GPU passthrough via nvidia-container-toolkit; the backend image now installs
     # a CUDA-enabled (cu128) torch build with Blackwell (sm_121) kernels for this
     # host's GB10 GPU. sam_device=auto picks it up automatically when available.
@@ -69,3 +107,4 @@ services:
 
 volumes:
   logs_data:
+  postgres_data:

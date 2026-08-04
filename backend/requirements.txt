@@ -11,6 +11,14 @@ python-multipart==0.0.9
 Pillow==10.4.0
 PyYAML==6.0.2
 
+# Annotation state / audit history storage (Phase 1a hardening - see
+# annotation_module_build_plan.md). psycopg (v3) rather than psycopg2: it
+# ships aarch64 wheels via the [binary] extra, needed for this host's
+# Grace Blackwell build (see the Dockerfile's torch install comment).
+SQLAlchemy==2.0.35
+alembic==1.13.3
+psycopg[binary]==3.2.3
+
 # Detector training/inference (fine-tunes a YOLOv8 model on your corrected
 # annotations; see app/services/detector_service.py)
 ultralytics

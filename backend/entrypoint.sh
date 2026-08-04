@@ -18,4 +18,7 @@ else
   echo "[entrypoint] Checkpoint already present at $CHECKPOINT_PATH, skipping download."
 fi
 
+echo "[entrypoint] Running Postgres migrations..."
+python3.11 -m alembic upgrade head
+
 exec "$@"
