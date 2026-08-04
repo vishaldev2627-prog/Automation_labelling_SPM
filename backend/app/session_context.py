@@ -48,7 +48,20 @@ class SessionBundle:
     """
 
     def __init__(self) -> None:
-        self.lock = threading.Lock()
+        # RLock, not Lock: get_propagation_service() acquires this lock, then
+        # - while still holding it - calls get_similarity_service() and
+        # get_mask_generation_service(), which each acquire it again for
+        # their own first-time construction (see their get_X_service()
+        # functions). With a plain Lock that's a same-thread self-deadlock
+        # whenever propagation is triggered before those two have been built
+        # for this session - which a first-ever "save + mark completed"
+        # always is. Reproduced live: the underlying DB write succeeded (it
+        # happens earlier in the request, unrelated to this lock) but the
+        # HTTP response never returned because the request thread deadlocked
+        # here afterward. RLock keeps the same cross-thread mutual-exclusion
+        # guarantee while allowing the thread that already holds it to
+        # re-enter.
+        self.lock = threading.RLock()
         self.last_used = time.monotonic()
         self.dataset_service: Any = None
         self.mask_generation_service: Any = None
