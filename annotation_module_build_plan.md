@@ -472,19 +472,30 @@ plan's descriptions are accurate; confirm the real code first (Q-A) or Phase 1 s
   data accumulates, not a one-time freeze-by-date deliverable. Note this doesn't relax the
   Phase 4 rule that *each* golden-set snapshot used to gate a given promotion is itself frozen —
   it means new snapshots can supersede old ones over time as curation matures, each one still
-  versioned and immutable once in use (§4.1, §5 risk). **Still open:** who (named domain
-  experts) does the curation — not answered yet.
-- **Q-E — Return-path format.** In what form does the pipeline emit low-conf / field-flagged /
-  gate-recall-audit misses back for triage (pipeline §7/§12, R6)? Defines the Phase 2 / Phase 7
-  contract. **Still open.**
+  versioned and immutable once in use (§4.1, §5 risk).
+  **✅ Curation permission mechanism now exists:** annotators can be assigned a `golden_curator`
+  role (`PUT /api/annotator/{id}/role`), so once the golden-set storage itself is built (Phase 4)
+  its write paths can check this role from day one. **Still open:** who (named domain experts,
+  by name) actually does the curation — that's a people/process answer, not something a role
+  field resolves on its own; still waiting on the pipeline team.
+- **Q-E — Return-path format — partially scoped.** In what form does the pipeline emit low-conf /
+  field-flagged / gate-recall-audit misses back for triage (pipeline §7/§12, R6)? Defines the
+  Phase 2 / Phase 7 contract. **Position fields (`longitudinal_position_mm` etc.) explicitly not
+  calculated locally** — those come from physical encoder counts (pipeline §4), not camera
+  optics, and no real calibration constants exist in this repo to compute them from safely (see
+  §5 risk "Spine-stamp loss breaks pipeline fusion" — fabricating this would be worse than
+  leaving it blank). **Still open, sent to pipeline team:** the wire format itself (webhook vs.
+  polling endpoint vs. queue vs. file drop) and whether it shares the Q-F bogie-batch channel or
+  is a separate higher-priority path.
 - **✅ Q-F — Frame arrival model — RESOLVED: discrete batches, one per bogie.** Not a continuous
   stream — each bogie's frames arrive as one complete batch. This bounds the ingestion
   endpoint's back-pressure design: size the intake/queue around "one bogie's worth of frames,"
   not an unbounded stream, and the tool is explicitly meant not to be burdened by full-train
   volume at once.
-- **Q-G — Deferred-type priority.** Which deferred label type (Phase 3) is wanted next —
-  confirmed-normal for PatchCore is the pipeline's zero-label unblocker (pipeline build-order
-  step 3) and is arguably higher priority than more polygon labeling. **Still open.**
+- **✅ Q-G — Deferred-type priority — RECONFIRMED, unchanged.** Confirmed-normal curation for
+  PatchCore remains the highest-priority deferred label type (Phase 3) after the current
+  detection+segmentation scope — the pipeline's zero-label unblocker (pipeline build-order step
+  3), ahead of crop-classify, fastener slot-occupancy, and wheel log-polar seg.
 
 ---
 
