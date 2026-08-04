@@ -6,6 +6,7 @@ import { useSettingsStore } from "../../store/settingsStore";
 export default function ClassPanel() {
   const classes = useDatasetStore((s) => s.classes);
   const setClassColor = useDatasetStore((s) => s.setClassColor);
+  const setClassSafetyCritical = useDatasetStore((s) => s.setClassSafetyCritical);
   const addClass = useDatasetStore((s) => s.addClass);
   const { hiddenClassIds, toggleClassVisibility, activeClassId, setActiveClassId } = useSettingsStore();
   const [newClassName, setNewClassName] = useState("");
@@ -56,6 +57,26 @@ export default function ClassPanel() {
             <span className={`flex-1 truncate ${hiddenClassIds.has(c.class_id) ? "text-gray-600 line-through" : "text-gray-300"}`}>
               {c.name}
             </span>
+            <button
+              // The ⚠ emoji renders with its own built-in color via the
+              // emoji font on most platforms, ignoring CSS `color` entirely
+              // (it's a multi-color glyph, not a monochrome one that
+              // respects currentColor) - conditionally rendering the emoji
+              // itself, not just its color class, is what actually toggles
+              // the visual state.
+              className={c.safety_critical ? "opacity-100" : "opacity-20 hover:opacity-60"}
+              onClick={(e) => {
+                e.stopPropagation();
+                setClassSafetyCritical(c.class_id, !c.safety_critical);
+              }}
+              title={
+                c.safety_critical
+                  ? "Safety-critical: never auto-accepted, always a human, always a second reviewer. Click to unmark."
+                  : "Not marked safety-critical. Click to mark - this class will never be eligible for auto-accept."
+              }
+            >
+              ⚠
+            </button>
             <button
               className="text-gray-500 hover:text-gray-200"
               onClick={(e) => {

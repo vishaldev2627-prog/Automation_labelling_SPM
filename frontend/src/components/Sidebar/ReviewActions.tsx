@@ -27,7 +27,12 @@ export default function ReviewActions() {
       .then(setReview)
       .catch(() => setReview(null))
       .finally(() => setLoading(false));
-  }, [imageId]);
+    // Also re-fetch on a `completed` flip, not just imageId: a bulk
+    // auto-accept (QueuePanel) can mark the image you're currently
+    // viewing completed+reviewed without ever changing which image is
+    // open, and this component's own review state wouldn't otherwise
+    // know to refetch.
+  }, [imageId, completed]);
 
   const submit = async (decision: "approved" | "rejected") => {
     if (!imageId) return;

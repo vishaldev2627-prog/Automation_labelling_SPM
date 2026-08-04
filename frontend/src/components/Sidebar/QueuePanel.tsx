@@ -1,11 +1,11 @@
 import { useState } from "react";
 import toast from "react-hot-toast";
-import { ReviewAPI, TriageAPI } from "../../api/client";
+import { AutoAcceptAPI, ReviewAPI, TriageAPI } from "../../api/client";
 import { useDatasetStore } from "../../store/datasetStore";
 import type { TriageQueue } from "../../types";
 
 type SimpleItem = { image_id: string; file_name: string };
-type TabKey = "low_confidence" | "novel" | "routine" | "pending_review" | "audit_sample";
+type TabKey = "low_confidence" | "novel" | "routine" | "pending_review" | "audit_sample" | "auto_accept";
 
 const TABS: { key: TabKey; label: string; title: string }[] = [
   { key: "low_confidence", label: "Low conf.", title: "Auto-detected objects with low confidence (Phase 2 tier 2)" },
@@ -13,13 +13,24 @@ const TABS: { key: TabKey; label: string; title: string }[] = [
   { key: "routine", label: "Routine", title: "A stable random sample, to catch silent drift (Phase 2 tier 4)" },
   { key: "pending_review", label: "Pending", title: "Completed images that still need a second-reviewer sign-off" },
   { key: "audit_sample", label: "Audit", title: "Mandatory 5-10% sample of propagated annotations" },
+  {
+    key: "auto_accept",
+    label: "Auto-accept",
+    title: "High-confidence frames of classes with a proven audit track record - never safety-critical classes",
+  },
 ];
 
 /** Phase 2 triage + Phase 4 review queues - jump-to-image lists, not
  * inline actions (approving/reviewing happens in ReviewActions once
- * you've actually opened the image). See annotation_module_build_plan.md. */
+ * you've actually opened the image). The one exception is "auto_accept",
+ * which has its own explicit bulk-accept button - see
+ * app.services.auto_accept_service for why that's safe (conservative,
+ * propose-then-confirm, never automatic). See
+ * annotation_module_build_plan.md. */
 export default function QueuePanel() {
   const jumpTo = useDatasetStore((s) => s.jumpTo);
+  const refreshImages = useDatasetStore((s) => s.refreshImages);
+  const refreshInfo = useDatasetStore((s) => s.refreshInfo);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<TabKey>("low_confidence");
   const [items, setItems] = useState<Record<TabKey, SimpleItem[]>>({
@@ -28,16 +39,19 @@ export default function QueuePanel() {
     routine: [],
     pending_review: [],
     audit_sample: [],
+    auto_accept: [],
   });
   const [loading, setLoading] = useState(false);
+  const [accepting, setAccepting] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
     try {
-      const [triage, pending, audit] = await Promise.all([
+      const [triage, pending, audit, autoAccept] = await Promise.all([
         TriageAPI.queue(),
         ReviewAPI.pending(),
         ReviewAPI.auditSample(),
+        AutoAcceptAPI.candidates(),
       ]);
       const q = triage as TriageQueue;
       setItems({
@@ -46,6 +60,7 @@ export default function QueuePanel() {
         routine: q.routine,
         pending_review: pending,
         audit_sample: audit,
+        auto_accept: autoAccept,
       });
     } catch {
       toast.error("Failed to load queues");
@@ -58,6 +73,21 @@ export default function QueuePanel() {
     const next = !open;
     setOpen(next);
     if (next) refresh();
+  };
+
+  const acceptAll = async () => {
+    const candidates = items.auto_accept;
+    if (candidates.length === 0) return;
+    setAccepting(true);
+    try {
+      const result = await AutoAcceptAPI.execute(candidates.map((c) => c.image_id));
+      toast.success(`Auto-accepted ${result.accepted} frame${result.accepted === 1 ? "" : "s"}`);
+      await Promise.all([refresh(), refreshImages(), refreshInfo()]);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail ?? "Auto-accept failed");
+    } finally {
+      setAccepting(false);
+    }
   };
 
   const current = items[tab];
@@ -90,6 +120,16 @@ export default function QueuePanel() {
               {loading ? "..." : "↻"}
             </button>
           </div>
+          {tab === "auto_accept" && current.length > 0 && (
+            <button
+              className="toolbar-btn mb-1 w-full bg-green-700/40 text-[11px] hover:bg-green-700/60"
+              onClick={acceptAll}
+              disabled={accepting}
+              title="Marks every frame below completed, attributed to System (auto-accept), with an approving review"
+            >
+              {accepting ? "Accepting..." : `Accept all ${current.length} frame${current.length === 1 ? "" : "s"}`}
+            </button>
+          )}
           {current.length === 0 ? (
             <p className="px-1 text-[11px] text-gray-500">{loading ? "Loading..." : "Nothing in this queue."}</p>
           ) : (

@@ -25,6 +25,7 @@ interface DatasetState {
   prev: () => void;
   jumpTo: (imageId: string) => void;
   setClassColor: (classId: number, color: string) => Promise<void>;
+  setClassSafetyCritical: (classId: number, safetyCritical: boolean) => Promise<void>;
   addClass: (name: string) => Promise<ClassInfo>;
   markImageCompleted: (imageId: string, completed: boolean) => void;
 }
@@ -183,6 +184,13 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
     await DatasetAPI.setClassColor(classId, color);
     set((state) => ({
       classes: state.classes.map((c) => (c.class_id === classId ? { ...c, color } : c)),
+    }));
+  },
+
+  setClassSafetyCritical: async (classId: number, safetyCritical: boolean) => {
+    await DatasetAPI.setClassSafetyCritical(classId, safetyCritical);
+    set((state) => ({
+      classes: state.classes.map((c) => (c.class_id === classId ? { ...c, safety_critical: safetyCritical } : c)),
     }));
   },
 

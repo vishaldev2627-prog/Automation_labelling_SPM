@@ -77,9 +77,17 @@ export const DatasetAPI = {
   classes: () => api.get<ClassInfo[]>("/dataset/classes").then((r) => r.data),
   setClassColor: (classId: number, color: string) =>
     api.put(`/dataset/classes/${classId}/color`, { color }).then((r) => r.data),
+  setClassSafetyCritical: (classId: number, safetyCritical: boolean) =>
+    api.put(`/dataset/classes/${classId}/safety-critical`, { safety_critical: safetyCritical }).then((r) => r.data),
   addClass: (name: string) => api.post<ClassInfo>("/dataset/classes", { name }).then((r) => r.data),
   views: () => api.get<DatasetView[]>("/dataset/views").then((r) => r.data),
   switchView: (view: string) => api.post<DatasetInfo>("/dataset/switch", { view }).then((r) => r.data),
+};
+
+export const AutoAcceptAPI = {
+  candidates: () => api.get<{ image_id: string; file_name: string }[]>("/auto-accept/candidates").then((r) => r.data),
+  execute: (imageIds: string[]) =>
+    api.post<{ accepted: number }>("/auto-accept/execute", { image_ids: imageIds }).then((r) => r.data),
 };
 
 export const ImagesAPI = {

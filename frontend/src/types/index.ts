@@ -59,6 +59,7 @@ export interface ClassInfo {
   class_id: number;
   name: string;
   color: string;
+  safety_critical: boolean;
 }
 
 export interface DatasetView {
