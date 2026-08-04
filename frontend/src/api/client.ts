@@ -11,6 +11,10 @@ import type {
   ImageAnnotations,
   ImageListItem,
   Point,
+  ReviewDecision,
+  ReviewReason,
+  ReviewRecord,
+  TriageQueue,
 } from "../types";
 
 const SESSION_ID_KEY = "railway-annotator:session-id";
@@ -140,6 +144,18 @@ export const DetectorAPI = {
   train: () => api.post<DetectorTrainJobStatus>("/detector/train").then((r) => r.data),
   status: (jobId: string) => api.get<DetectorTrainJobStatus>(`/detector/train/${jobId}`).then((r) => r.data),
   active: () => api.get<DetectorInfo>("/detector/active").then((r) => r.data),
+};
+
+export const TriageAPI = {
+  queue: () => api.get<TriageQueue>("/triage/queue").then((r) => r.data),
+};
+
+export const ReviewAPI = {
+  pending: () => api.get<{ image_id: string; file_name: string }[]>("/review/pending").then((r) => r.data),
+  auditSample: () => api.get<{ image_id: string; file_name: string }[]>("/review/audit-sample").then((r) => r.data),
+  get: (imageId: string) => api.get<ReviewRecord | null>(`/review/${imageId}`).then((r) => r.data),
+  submit: (imageId: string, decision: ReviewDecision, reason: ReviewReason, notes?: string) =>
+    api.post<ReviewRecord>(`/review/${imageId}`, { decision, reason, notes }).then((r) => r.data),
 };
 
 export default api;

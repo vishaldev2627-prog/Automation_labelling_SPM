@@ -107,3 +107,32 @@ export interface DetectorInfo {
 }
 
 export type ToolMode = "select" | "edit-vertex" | "add-point" | "positive-click" | "negative-click" | "draw-box" | "pan";
+
+export interface TriageItem {
+  image_id: string;
+  file_name: string;
+  tier: string;
+  score: number;
+}
+
+export interface TriageQueue {
+  field_flagged: TriageItem[];
+  gate_recall_audit_miss: TriageItem[];
+  low_confidence: TriageItem[];
+  novel: TriageItem[];
+  routine: TriageItem[];
+}
+
+export type ReviewDecision = "approved" | "rejected";
+export type ReviewReason = "second_review" | "audit_sample";
+
+export interface ReviewRecord {
+  id: number;
+  image_id: string;
+  reviewer_id: number;
+  reviewer_name: string;
+  decision: ReviewDecision;
+  reason: ReviewReason;
+  notes: string | null;
+  created_at: string;
+}
