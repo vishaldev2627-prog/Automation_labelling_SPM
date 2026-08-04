@@ -209,20 +209,39 @@ annotations feed export) are exactly right and must survive every later phase.
 > are **explicitly out of scope now**. Do not silently drop them — carry as a named backlog so
 > the annotation module can extend to them without a rebuild.
 
-### Phase 4 — QA / audit layer `New — safety-critical`
+### Phase 4 — QA / audit layer `New — safety-critical` — sign-off + audit sampling shipped
 
 The phase the current tool lacks, and the one that matters most given the target: undercarriage
 and wheel defects on operating trains. One annotator's mistake propagated onto near-duplicate
 frames, then into training data, is a **safety** risk here, not a quality nuisance.
 
-- **Second-reviewer sign-off** required before annotations count as `completed` for training
-  (today, one save = done).
-- **Mandatory audit sample (5–10%) of *propagated* annotations** re-reviewed independently —
-  propagation trades review depth for speed, so it needs its own spot-check.
-- **Curate + freeze the per-class golden eval set** here (feeds Phase 6). Structurally separate
-  storage; **no propagation/pseudo-label/pipeline path may ever write to it** (risk §5).
+- **✅ Second-reviewer sign-off — mechanism shipped, not yet wired to gate export.**
+  `annotation_reviews` (append-only) records reviewer/decision/reason per image via
+  `POST /api/review/{image_id}`; the second reviewer must differ from whoever submitted the
+  annotation (`annotation_state.updated_by_id`), enforced server-side — except for historical/
+  backfilled data with no known submitter, which isn't blocked against an unknown person.
+  `GET /api/review/pending` lists completed-but-unreviewed images. **Deliberately not yet wired
+  into `completed`/export gating** — retroactively requiring approval for the ~1760 images
+  already completed under the old single-save semantics is a product-owner workflow call, not
+  an engineering one to make silently. That decision is still open.
+- **✅ Mandatory audit sample (5–10%) of *propagated* annotations — shipped.**
+  `GET /api/review/audit-sample` draws a stable 7.5%-seeded random sample of completed images
+  containing propagated objects, excluding ones already sampled. Reviewed the same way as
+  second-review (`POST /api/review/{image_id}`, `reason: "audit_sample"`), same append-only table.
+- **Curate + freeze the per-class golden eval set — not yet built.** Feeds Phase 6. Structurally
+  separate storage; **no propagation/pseudo-label/pipeline path may ever write to it** (risk §5).
+  **✅ Permission groundwork exists**: annotators can hold a `golden_curator` role
+  (`PUT /api/annotator/{id}/role`) so this storage's write paths can check it from day one once
+  built — the storage table itself doesn't exist yet.
 - Golden set must have **enough examples per safety-relevant class** (cracked wheel, shelling,
   crack/corrosion) to make a per-class promotion check statistically meaningful (pipeline R10).
+
+> **Bug found during testing, not yet fixed — flagged separately:** a save that triggers the
+> *first-ever* `get_propagation_service()` initialization in a running process can hang for an
+> extremely long time before returning a response, even though the underlying write completes
+> correctly (verified: DB state was correct while the HTTP response never arrived). Needs its own
+> investigation — likely a cold-start cost (model load) blocking the response path somewhere it
+> shouldn't. Pre-existing, not introduced by this phase's changes.
 
 ### Phase 5 — Dataset versioning & export → staged snapshot for MLflow `New — this is the versioning plan`
 
