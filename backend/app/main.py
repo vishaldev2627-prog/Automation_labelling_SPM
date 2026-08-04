@@ -8,7 +8,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.routers import annotator, batch, dataset, detector, export, images, masks, progress, review, similarity, triage
+from app.routers import (
+    annotator,
+    auto_accept,
+    batch,
+    dataset,
+    detector,
+    export,
+    images,
+    masks,
+    progress,
+    review,
+    similarity,
+    triage,
+)
 from app.utils.logging_config import setup_logging
 
 settings = get_settings()
@@ -59,6 +72,7 @@ app.include_router(detector.router)
 app.include_router(similarity.router)
 app.include_router(triage.router)
 app.include_router(review.router)
+app.include_router(auto_accept.router)
 
 
 @app.on_event("startup")

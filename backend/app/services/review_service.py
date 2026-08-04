@@ -21,7 +21,7 @@ from app.models.schemas import ReviewRecord, TriageItem
 from app.services.dataset_service import DatasetService
 
 VALID_DECISIONS = ("approved", "rejected")
-VALID_REASONS = ("second_review", "audit_sample")
+VALID_REASONS = ("second_review", "audit_sample", "auto_accept")
 
 AUDIT_SAMPLE_RATE = 0.075  # 5-10% per the plan's Phase 4 - middle of that range
 AUDIT_SAMPLE_SEED = 42  # stable across calls, like the Phase 2 routine tier
