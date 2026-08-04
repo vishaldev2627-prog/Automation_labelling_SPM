@@ -145,21 +145,41 @@ half with a real dependency doesn't block the half that doesn't:
   §6) and an actual live connection to the pipeline, neither of which exist yet. Designing it now
   means guessing at a contract we'd likely have to rebuild.
 
-### Phase 2 — Triage & prioritization `Foundation`
+### Phase 2 — Triage & prioritization `Foundation` — partially shipped
 
 Not every pipeline frame is worth a human's time. Highest-leverage phase for throughput.
 
 **Priority tiers (highest first)**
 1. **Field-flagged + gate-recall-audit misses** — operator/inspector reports, and defects the
    pipeline's anomaly gate never tiled (pipeline R6). Always reviewed, senior annotator.
+   **Not built — blocked on Q-E (§6) and an actual pipeline connection**, neither of which exist
+   yet. `GET /api/triage/queue` always returns these tiers empty (not omitted), so wiring in real
+   pipeline data later is additive, not a response-shape change.
 2. **Low-confidence pipeline detections** — the model's own uncertainty (`conf` from the
    detection record) is the cheapest active-learning signal; already in the pipeline output.
-3. **Novel / out-of-distribution frames** — reuse `similarity_service.py`, but **invert** it:
-   instead of finding near-duplicates to *skip*, flag frames far from the training set.
-4. **Routine confirmations** — small random sample of high-`conf` frames, to catch silent drift.
+   **Shipped as a local-detector proxy, not the real thing.** `detector_service.detect()` now
+   returns per-box confidence instead of discarding it (it was computed via ultralytics'
+   `box.conf` and thrown away before reaching `AnnotationObject`, which already had an unused
+   `confidence` field). `triage_service.py`'s `low_confidence` tier ranks not-yet-completed
+   images by their saved objects' average confidence — only covers images that have been through
+   at least one save with detector-sourced objects, since confidence isn't computed synchronously
+   per triage request. Swap for the pipeline's real `conf` once Phase 1b lands.
+3. **Novel / out-of-distribution frames — shipped.** `similarity_service.novelty_scores()`
+   inverts the existing near-duplicate index — one vectorized matmul over whatever's already
+   indexed, scoring every image by `1 - (max similarity to any other image)`. Exactly tier 3 as
+   designed; doesn't touch pipeline data at all.
+4. **Routine confirmations — shipped as a simplification.** A small seeded-random sample of
+   whatever's left after tiers 2/3 claim their images (not filtered to "high-`conf`" specifically,
+   since that filter needs tier 2's real signal — see above). Stable across repeated calls so it
+   doesn't reshuffle on every request.
 
 Near-duplicate frames of the same pass stay deduped via existing similarity/propagation
 (`propagation_service.py`) rather than entering the human queue.
+
+> Tested against the real mounted dataset (2013 images, side_view): tiers are mutually exclusive,
+> completed images never leak into any tier, an empty dataset degrades to all-empty tiers instead
+> of erroring, and the Phase 1a migration's progress counts were unchanged after this change
+> (no regression). No frontend surface yet — `GET /api/triage/queue` only, for now.
 
 > **Deferred triage input:** the pipeline's PatchCore anomaly gate (P2) needs a curated
 > *confirmed-normal* pool (pipeline §5, §12). Curating that pool is out of this build's label
