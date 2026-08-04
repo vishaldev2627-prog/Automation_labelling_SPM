@@ -179,7 +179,8 @@ Near-duplicate frames of the same pass stay deduped via existing similarity/prop
 > Tested against the real mounted dataset (2013 images, side_view): tiers are mutually exclusive,
 > completed images never leak into any tier, an empty dataset degrades to all-empty tiers instead
 > of erroring, and the Phase 1a migration's progress counts were unchanged after this change
-> (no regression). No frontend surface yet — `GET /api/triage/queue` only, for now.
+> (no regression). **✅ Frontend now exists:** `QueuePanel` (Sidebar) surfaces all five tiers as
+> jump-to-image lists.
 
 > **Deferred triage input:** the pipeline's PatchCore anomaly gate (P2) needs a curated
 > *confirmed-normal* pool (pipeline §5, §12). Curating that pool is out of this build's label
@@ -231,6 +232,10 @@ frames, then into training data, is a **safety** risk here, not a quality nuisan
   `GET /api/review/audit-sample` draws a stable 7.5%-seeded random sample of completed images
   containing propagated objects, excluding ones already sampled. Reviewed the same way as
   second-review (`POST /api/review/{image_id}`, `reason: "audit_sample"`), same append-only table.
+- **✅ Frontend now exists:** `ReviewActions` (Sidebar) shows the currently-open image's review
+  status and lets an annotator approve/reject with a reason + optional notes — tied to whichever
+  image is actually open (via `QueuePanel`'s jump-to-image), not a queue-list action, since
+  approving requires having looked at the image.
 - **Curate + freeze the per-class golden eval set — not yet built.** Feeds Phase 6. Structurally
   separate storage; **no propagation/pseudo-label/pipeline path may ever write to it** (risk §5).
   **✅ Permission groundwork exists**: annotators can hold a `golden_curator` role
