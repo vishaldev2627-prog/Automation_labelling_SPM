@@ -1,3 +1,4 @@
+import toast from "react-hot-toast";
 import { useAnnotationStore } from "../../store/annotationStore";
 import { useDatasetStore } from "../../store/datasetStore";
 
@@ -15,6 +16,14 @@ export default function ObjectList() {
       class_name: newClass?.name ?? o.class_name,
       status: "edited",
     }));
+  };
+
+  const handleRegenerate = async (objectId: string) => {
+    try {
+      await regenerateObject(objectId);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail ?? "Failed to regenerate mask");
+    }
   };
 
   const active = objects.filter((o) => o.status !== "rejected");
@@ -84,7 +93,7 @@ export default function ObjectList() {
               title="Regenerate mask"
               onClick={(e) => {
                 e.stopPropagation();
-                regenerateObject(o.id);
+                handleRegenerate(o.id);
               }}
             >
               ↻

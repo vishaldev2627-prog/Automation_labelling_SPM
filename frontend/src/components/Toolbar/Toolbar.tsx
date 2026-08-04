@@ -107,6 +107,14 @@ export default function Toolbar() {
     }
   };
 
+  const handleGenerateAll = async () => {
+    try {
+      await generateAllMasks();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail ?? "Failed to generate masks");
+    }
+  };
+
   const handleApplyRefinement = async () => {
     if (!selectedObjectId) {
       toast.error("Select an object first");
@@ -293,7 +301,7 @@ export default function Toolbar() {
       </button>
       <button
         className={`toolbar-btn ${needsGeneration && !generatingAll ? "animate-pulse bg-amber-600 hover:bg-amber-500" : ""}`}
-        onClick={() => generateAllMasks()}
+        onClick={handleGenerateAll}
         disabled={generatingAll}
         title={needsGeneration ? "This image has objects without masks yet — click to generate" : "Regenerate all masks for this image"}
       >
