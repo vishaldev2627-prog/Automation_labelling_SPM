@@ -57,10 +57,14 @@ const api = axios.create({ baseURL: "/api", timeout: 60_000 });
 // curl) that don't carry cookies but can set a header.
 api.defaults.headers.common["X-Session-Id"] = sessionId;
 
+type AnnotatorIdentity = { id: number | null; name: string | null; role: string | null };
+
 export const AnnotatorAPI = {
-  me: () => api.get<{ id: number | null; name: string | null }>("/annotator/me").then((r) => r.data),
-  identify: (name: string) =>
-    api.post<{ id: number | null; name: string | null }>("/annotator/identify", { name }).then((r) => r.data),
+  me: () => api.get<AnnotatorIdentity>("/annotator/me").then((r) => r.data),
+  identify: (name: string) => api.post<AnnotatorIdentity>("/annotator/identify", { name }).then((r) => r.data),
+  list: () => api.get<AnnotatorIdentity[]>("/annotator").then((r) => r.data),
+  setRole: (annotatorId: number, role: string) =>
+    api.put<AnnotatorIdentity>(`/annotator/${annotatorId}/role`, { role }).then((r) => r.data),
 };
 
 export const DatasetAPI = {

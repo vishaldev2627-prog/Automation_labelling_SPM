@@ -36,12 +36,22 @@ from app.db import Base
 
 class Annotator(Base):
     """A named human identity (see task #3) - not full auth, just a name
-    every save/review can be attributed to."""
+    every save/review can be attributed to.
+
+    `role` is plain "annotator" by default. "golden_curator" marks who is
+    allowed to verify or update the frozen golden eval set (Phase 4, plan
+    §5 risk "Golden-set contamination") - the golden set itself (a separate
+    storage table) isn't built yet, so this role doesn't gate anything on
+    its own yet either. It exists now so Phase 4's golden-set write paths
+    can check it from day one instead of retrofitting a permission concept
+    onto data that's already live. Enforced at the application layer, not a
+    DB enum/check constraint, to keep adding roles a one-line change."""
 
     __tablename__ = "annotators"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    role: Mapped[str] = mapped_column(String, nullable=False, server_default="annotator")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

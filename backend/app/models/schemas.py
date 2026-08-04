@@ -184,6 +184,11 @@ class IdentifyRequest(BaseModel):
 class AnnotatorIdentity(BaseModel):
     id: Optional[int] = None
     name: Optional[str] = None
+    role: Optional[str] = None
+
+
+class SetRoleRequest(BaseModel):
+    role: str
 
 
 class TriageItem(BaseModel):
