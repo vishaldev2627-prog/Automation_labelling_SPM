@@ -227,10 +227,14 @@ class DetectorService:
             self._loaded_model_path = path
             return self._loaded_model
 
-    def detect(self, image_path: Path, classes: list[str]) -> list[tuple[int, BoundingBox]]:
+    def detect(self, image_path: Path, classes: list[str]) -> list[tuple[int, BoundingBox, float]]:
         """Run the most recently trained detector on an image with no
-        pre-existing labels, returning (class_id, bbox) tuples in the same
-        shape as parse_detection_label_file."""
+        pre-existing labels, returning (class_id, bbox, confidence) tuples -
+        confidence is ultralytics' own box.conf, otherwise discarded here
+        the same way it always was upstream of parse_detection_label_file
+        (plain YOLO label files carry no confidence field at all). Used by
+        the Phase 2 triage service as the only confidence signal available
+        before the pipeline supplies its own (see Q-E, build plan §6)."""
         if not self.is_active():
             return []
         model = self._ensure_model_loaded()
@@ -239,7 +243,7 @@ class DetectorService:
             return []
         result = results[0]
         h, w = result.orig_shape
-        detections: list[tuple[int, BoundingBox]] = []
+        detections: list[tuple[int, BoundingBox, float]] = []
         for box in result.boxes:
             class_id = int(box.cls.item())
             if class_id >= len(classes):
@@ -254,6 +258,7 @@ class DetectorService:
                         width=(x2 - x1) / w,
                         height=(y2 - y1) / h,
                     ),
+                    float(box.conf.item()),
                 )
             )
         return detections

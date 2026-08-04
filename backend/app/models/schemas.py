@@ -186,6 +186,28 @@ class AnnotatorIdentity(BaseModel):
     name: Optional[str] = None
 
 
+class TriageItem(BaseModel):
+    image_id: str
+    file_name: str
+    tier: str
+    score: float = 0.0
+
+
+class TriageQueue(BaseModel):
+    """Phase 2 triage (see annotation_module_build_plan.md §2 Phase 2).
+    field_flagged/gate_recall_audit_miss are always empty here - blocked on
+    Q-E (pipeline return-path format) and an actual pipeline connection,
+    neither of which exist yet. Kept in the response shape (not omitted) so
+    a future pipeline integration only has to populate them, not add a
+    field the frontend doesn't already know about."""
+
+    field_flagged: list[TriageItem] = Field(default_factory=list)
+    gate_recall_audit_miss: list[TriageItem] = Field(default_factory=list)
+    low_confidence: list[TriageItem] = Field(default_factory=list)
+    novel: list[TriageItem] = Field(default_factory=list)
+    routine: list[TriageItem] = Field(default_factory=list)
+
+
 class SimilarityIndexStatus(BaseModel):
     job_id: str
     total: int

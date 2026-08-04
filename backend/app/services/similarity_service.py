@@ -161,6 +161,23 @@ class SimilarityService:
                 self._persist()
         return True
 
+    def novelty_scores(self) -> dict[str, float]:
+        """Same index as near-duplicate detection, inverted (Phase 2 tier 3,
+        see annotation_module_build_plan.md): a LOW similarity to every
+        other indexed image means high novelty - likely worth a human
+        look - rather than the near-duplicate-skipping this index normally
+        supports. Score is 1 - (max similarity to any other image), so
+        higher = more novel. One vectorized matmul over whatever's already
+        indexed (see start_reindex) - doesn't force-embed anything."""
+        self._ensure_loaded()
+        with self._lock:
+            if self._embeddings is None or len(self._ids) < 2:
+                return {}
+            sims = self._embeddings @ self._embeddings.T
+            np.fill_diagonal(sims, -1.0)
+            max_sim = sims.max(axis=1)
+            return {image_id: float(1.0 - max_sim[i]) for i, image_id in enumerate(self._ids)}
+
     def nearest_neighbors(self, image_id: str, k: int = 5, min_similarity: float = 0.0) -> list[SimilarNeighbor]:
         self._ensure_loaded()
         self.ensure_indexed(image_id)

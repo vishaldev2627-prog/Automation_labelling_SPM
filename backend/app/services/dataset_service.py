@@ -262,6 +262,12 @@ class DatasetService:
         finally:
             db.close()
 
+    def get_saved_states(self, image_ids: list[str]) -> dict[str, dict]:
+        """Public bulk read of already-saved annotation state, keyed by
+        image_id. Used by triage_service to inspect saved object confidence
+        without forcing a fresh detector run per image."""
+        return self._read_states_bulk(image_ids)
+
     def get_annotations(self, image_id: str) -> ImageAnnotations:
         """Get annotations for an image, loading from saved state or initializing
         fresh from the original YOLO detection labels on first access."""
@@ -273,8 +279,13 @@ class DatasetService:
 
         width, height = get_image_dimensions(path)
         label_path = image_stem_to_label_path(self._labels_dir, path)
-        detections = parse_detection_label_file(label_path)
-        if not detections:
+        pre_existing = parse_detection_label_file(label_path)
+        if pre_existing:
+            # Pre-existing ground-truth-style boxes from labels/*.txt carry
+            # no confidence value at all (plain YOLO label files never do) -
+            # 0.0 here means "no confidence signal", not "low confidence".
+            detections = [(class_id, bbox, 0.0) for class_id, bbox in pre_existing]
+        else:
             detections = self._try_auto_detect(path)
         objects = [
             AnnotationObject(
@@ -282,9 +293,10 @@ class DatasetService:
                 class_id=class_id,
                 class_name=self._classes[class_id] if class_id < len(self._classes) else f"class_{class_id}",
                 bbox=bbox,
+                confidence=confidence,
                 status=ObjectStatus.PENDING,
             )
-            for class_id, bbox in detections
+            for class_id, bbox, confidence in detections
         ]
         annotations = ImageAnnotations(
             image_id=image_id,
@@ -296,7 +308,7 @@ class DatasetService:
         )
         return annotations
 
-    def _try_auto_detect(self, path: Path) -> list[tuple[int, BoundingBox]]:
+    def _try_auto_detect(self, path: Path) -> list[tuple[int, BoundingBox, float]]:
         """Fall back to the most recently trained detector for images that
         have no pre-existing detection labels at all."""
         try:
