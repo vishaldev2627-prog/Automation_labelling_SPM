@@ -1,9 +1,10 @@
 """Dataset scanning, per-image annotation state, autosave and progress tracking.
 
-State is persisted as one JSON file per image inside `<dataset>/.annotation_state/`,
-plus a `_meta.json` with class list/colors and dataset-level bookkeeping. This
-gives crash recovery for free: any accepted edit is written to disk immediately
-and reloaded on the next request for that image.
+Per-image annotation state and class colors are persisted in Postgres (see
+app.services.annotation_state_repo), keyed by this dataset's resolved root
+path - not per-dataset JSON files anymore (Phase 1a, task #4). `.annotation_state/`
+still exists on disk as a directory: similarity_service.py caches its
+embedding index there, which is unrelated to annotation state.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.config import Settings
+from app.db import SessionLocal
 from app.models.schemas import (
     AnnotationObject,
     BoundingBox,
@@ -23,7 +25,9 @@ from app.models.schemas import (
     ImageListItem,
     ObjectStatus,
 )
-from app.utils.file_utils import atomic_write_json, image_stem_to_label_path, new_id, read_json
+from app.services import annotation_state_repo as state_repo
+from app.session_context import get_current_annotator
+from app.utils.file_utils import image_stem_to_label_path, new_id
 from app.utils.image_utils import get_image_dimensions, list_images
 from app.utils.yolo_utils import load_class_names, parse_detection_label_file
 
@@ -74,6 +78,7 @@ class DatasetService:
         self._images_dir: Optional[Path] = None
         self._labels_dir: Optional[Path] = None
         self._state_dir: Optional[Path] = None
+        self._dataset_key: Optional[str] = None  # resolved dataset root; DB key for annotation_state/dataset_classes
         self._index: dict[str, Path] = {}  # image_id -> image path
         self._classes: list[str] = []
         self._colors: dict[str, str] = {}
@@ -95,6 +100,7 @@ class DatasetService:
             self._labels_dir = labels_dir
             self._state_dir = root / self._settings.state_dir_name
             self._state_dir.mkdir(parents=True, exist_ok=True)
+            self._dataset_key = str(root.resolve())
 
             images = list_images(images_dir)
             self._index = {self._image_id_for(p): p for p in images}
@@ -130,22 +136,18 @@ class DatasetService:
         self.require_loaded()
         return self._state_dir
 
-    @property
-    def meta_path(self) -> Path:
-        return self._state_dir / "_meta.json"
-
     def _load_class_colors(self) -> None:
-        meta = read_json(self.meta_path, default={})
-        colors = meta.get("colors", {}) if isinstance(meta, dict) else {}
-        for i, name in enumerate(self._classes):
-            key = str(i)
-            if key not in colors:
-                colors[key] = DEFAULT_PALETTE[i % len(DEFAULT_PALETTE)]
-        self._colors = colors
-        self._save_meta()
-
-    def _save_meta(self) -> None:
-        atomic_write_json(self.meta_path, {"classes": self._classes, "colors": self._colors})
+        db = SessionLocal()
+        try:
+            colors = state_repo.get_colors(db, self._dataset_key)
+            for i, _name in enumerate(self._classes):
+                key = str(i)
+                if key not in colors:
+                    colors[key] = DEFAULT_PALETTE[i % len(DEFAULT_PALETTE)]
+            self._colors = colors
+            state_repo.save_colors_bulk(db, self._dataset_key, self._classes, self._colors)
+        finally:
+            db.close()
 
     def get_classes(self) -> list[ClassInfo]:
         return [
@@ -156,7 +158,12 @@ class DatasetService:
     def set_class_color(self, class_id: int, color: str) -> None:
         with self._lock:
             self._colors[str(class_id)] = color
-            self._save_meta()
+            db = SessionLocal()
+            try:
+                name = self._classes[class_id] if class_id < len(self._classes) else f"class_{class_id}"
+                state_repo.set_class_color(db, self._dataset_key, class_id, name, color)
+            finally:
+                db.close()
 
     def add_class(self, name: str) -> ClassInfo:
         """Add a new class the detector never saw, persisting it back to disk
@@ -184,7 +191,11 @@ class DatasetService:
             self._classes = current
             color = DEFAULT_PALETTE[class_id % len(DEFAULT_PALETTE)]
             self._colors[str(class_id)] = color
-            self._save_meta()
+            db = SessionLocal()
+            try:
+                state_repo.save_colors_bulk(db, self._dataset_key, self._classes, self._colors)
+            finally:
+                db.close()
             self._persist_class_names()
             return ClassInfo(class_id=class_id, name=name, color=color)
 
@@ -212,9 +223,10 @@ class DatasetService:
     # --------------------------------------------------------------- index
     def list_images(self) -> list[ImageListItem]:
         self.require_loaded()
+        states = self._read_states_bulk(list(self._index.keys()))
         items = []
         for image_id, path in self._index.items():
-            state = self._read_state(image_id)
+            state = states.get(image_id)
             items.append(
                 ImageListItem(
                     image_id=image_id,
@@ -236,11 +248,19 @@ class DatasetService:
         return list(self._index.keys())
 
     # ------------------------------------------------------------ per-image
-    def _state_path(self, image_id: str) -> Path:
-        return self._state_dir / f"{image_id}.json"
-
     def _read_state(self, image_id: str) -> Optional[dict]:
-        return read_json(self._state_path(image_id), default=None)
+        db = SessionLocal()
+        try:
+            return state_repo.get_state(db, self._dataset_key, image_id)
+        finally:
+            db.close()
+
+    def _read_states_bulk(self, image_ids: list[str]) -> dict[str, dict]:
+        db = SessionLocal()
+        try:
+            return state_repo.get_states_bulk(db, self._dataset_key, image_ids)
+        finally:
+            db.close()
 
     def get_annotations(self, image_id: str) -> ImageAnnotations:
         """Get annotations for an image, loading from saved state or initializing
@@ -294,22 +314,29 @@ class DatasetService:
         """Persist annotation state for an image (autosave target)."""
         self.require_loaded()
         annotations.last_modified = time.time()
-        with self._lock:
-            atomic_write_json(self._state_path(annotations.image_id), annotations.model_dump(mode="json"))
+        annotator_id, _ = get_current_annotator()
+        db = SessionLocal()
+        try:
+            state_repo.save_state(
+                db,
+                self._dataset_key,
+                annotations.image_id,
+                annotations.model_dump(mode="json"),
+                annotations.completed,
+                annotator_id,
+            )
+        finally:
+            db.close()
 
     # -------------------------------------------------------------- progress
     def get_dataset_info(self) -> DatasetInfo:
         self.require_loaded()
         total = len(self._index)
-        completed = 0
-        durations: list[float] = []
-        for image_id in self._index:
-            state = self._read_state(image_id)
-            if state and state.get("completed"):
-                completed += 1
+        states = self._read_states_bulk(list(self._index.keys()))
+        completed = sum(1 for state in states.values() if state.get("completed"))
 
         percent = (completed / total * 100.0) if total else 0.0
-        eta = self._estimate_eta(total, completed)
+        eta = self._estimate_eta(total, completed, states)
         return DatasetInfo(
             dataset_path=str(self._images_dir.parent) if self._images_dir else "",
             total_images=total,
@@ -320,15 +347,15 @@ class DatasetService:
             estimated_seconds_remaining=eta,
         )
 
-    def _estimate_eta(self, total: int, completed: int) -> Optional[float]:
+    def _estimate_eta(self, total: int, completed: int, states: dict[str, dict]) -> Optional[float]:
         """Estimate remaining time from the average gap between completion timestamps."""
         if completed < 2:
             return None
-        timestamps = []
-        for image_id in self._index:
-            state = self._read_state(image_id)
-            if state and state.get("completed") and state.get("last_modified"):
-                timestamps.append(state["last_modified"])
+        timestamps = [
+            state["last_modified"]
+            for state in states.values()
+            if state.get("completed") and state.get("last_modified")
+        ]
         if len(timestamps) < 2:
             return None
         timestamps.sort()
