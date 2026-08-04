@@ -17,11 +17,15 @@ router = APIRouter(prefix="/api/dataset", tags=["dataset"])
 # labels/.annotation_state/data.yaml each) living as sibling subfolders under
 # the configured DATASET_PATH, split by camera angle. side_view holds the
 # original, fully-annotated dataset; underbelly/wheel_shelling start empty
-# and get populated as that footage becomes available.
+# and get populated as that footage becomes available. buffer is a raw,
+# unlabeled frame dump with no pre-existing class list - starts with zero
+# classes, built up via the Classes panel's +Add as annotators encounter
+# components (product decision, not a fallback default).
 DATASET_VIEWS = [
     DatasetView(key="side_view", label="Side View"),
     DatasetView(key="underbelly", label="Underbelly"),
     DatasetView(key="wheel_shelling", label="Wheel Shelling"),
+    DatasetView(key="buffer", label="Buffer"),
 ]
 _VIEW_KEYS = {v.key for v in DATASET_VIEWS}
 
