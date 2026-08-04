@@ -177,6 +177,15 @@ class SimilarNeighbor(BaseModel):
     similarity: float
 
 
+class IdentifyRequest(BaseModel):
+    name: str
+
+
+class AnnotatorIdentity(BaseModel):
+    id: Optional[int] = None
+    name: Optional[str] = None
+
+
 class SimilarityIndexStatus(BaseModel):
     job_id: str
     total: int

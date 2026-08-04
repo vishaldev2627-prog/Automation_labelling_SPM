@@ -15,10 +15,27 @@ import type {
 
 const SESSION_ID_KEY = "railway-annotator:session-id";
 
+function randomUUID(): string {
+  // crypto.randomUUID() only exists in secure contexts (https, or plain
+  // http on "localhost") - it throws when the tool is reached over plain
+  // HTTP by IP/hostname (e.g. an internal deployment address), which would
+  // otherwise crash the app before it renders anything. Fall back to a
+  // non-cryptographic UUID v4 in that case; this id only needs to be
+  // unique per browser tab, not unguessable.
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 function getOrCreateSessionId(): string {
   let id = localStorage.getItem(SESSION_ID_KEY);
   if (!id) {
-    id = crypto.randomUUID();
+    id = randomUUID();
     localStorage.setItem(SESSION_ID_KEY, id);
   }
   return id;
@@ -39,6 +56,12 @@ const api = axios.create({ baseURL: "/api", timeout: 60_000 });
 // Kept alongside the cookie for any non-browser API consumers (scripts,
 // curl) that don't carry cookies but can set a header.
 api.defaults.headers.common["X-Session-Id"] = sessionId;
+
+export const AnnotatorAPI = {
+  me: () => api.get<{ id: number | null; name: string | null }>("/annotator/me").then((r) => r.data),
+  identify: (name: string) =>
+    api.post<{ id: number | null; name: string | null }>("/annotator/identify", { name }).then((r) => r.data),
+};
 
 export const DatasetAPI = {
   load: (datasetPath: string) => api.post<DatasetInfo>("/dataset/load", { dataset_path: datasetPath }).then((r) => r.data),

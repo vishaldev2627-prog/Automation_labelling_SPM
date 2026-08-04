@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.routers import batch, dataset, detector, export, images, masks, progress, similarity
+from app.routers import annotator, batch, dataset, detector, export, images, masks, progress, similarity
 from app.utils.logging_config import setup_logging
 
 settings = get_settings()
@@ -48,6 +48,7 @@ async def session_context_middleware(request: Request, call_next):
     set_current_session_id(session_id)
     return await call_next(request)
 
+app.include_router(annotator.router)
 app.include_router(dataset.router)
 app.include_router(images.router)
 app.include_router(masks.router)

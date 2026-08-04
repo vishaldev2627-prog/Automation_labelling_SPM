@@ -5,6 +5,7 @@ import { useAnnotationStore } from "../../store/annotationStore";
 import { useDatasetStore } from "../../store/datasetStore";
 import { useSettingsStore } from "../../store/settingsStore";
 import type { DetectorInfo, ToolMode } from "../../types";
+import AnnotatorIdentity from "./AnnotatorIdentity";
 
 const TOOLS: { mode: ToolMode; label: string; icon: string }[] = [
   { mode: "select", label: "Select / Edit", icon: "🖱" },
@@ -194,6 +195,8 @@ export default function Toolbar() {
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-surface-700 bg-surface-900 px-3 py-2">
+      <AnnotatorIdentity />
+      <div className="mx-1 h-6 w-px bg-surface-600" />
       {views.length > 0 && (
         <select
           value={currentView ?? ""}

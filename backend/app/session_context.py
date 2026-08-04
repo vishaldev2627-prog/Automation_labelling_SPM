@@ -56,6 +56,11 @@ class SessionBundle:
         self.propagation_service: Any = None
         self.detector_service: Any = None
         self.similarity_service: Any = None
+        # Lightweight per-annotator identity (Phase 1a, task #3) - a name,
+        # not a login. Set via POST /api/annotator/identify, read by
+        # dataset_service.py when it records who made a save (task #4).
+        self.annotator_id: Optional[int] = None
+        self.annotator_name: Optional[str] = None
 
     def touch(self) -> None:
         self.last_used = time.monotonic()
@@ -78,6 +83,20 @@ def get_session_bundle() -> SessionBundle:
                 _evict_idle_sessions_locked()
     bundle.touch()
     return bundle
+
+
+def set_current_annotator(annotator_id: int, name: str) -> None:
+    """Attach a resolved annotator identity to the current request's session
+    bundle, so it survives across requests from the same browser tab."""
+    bundle = get_session_bundle()
+    with bundle.lock:
+        bundle.annotator_id = annotator_id
+        bundle.annotator_name = name
+
+
+def get_current_annotator() -> tuple[Optional[int], Optional[str]]:
+    bundle = get_session_bundle()
+    return bundle.annotator_id, bundle.annotator_name
 
 
 def _evict_idle_sessions_locked() -> None:
