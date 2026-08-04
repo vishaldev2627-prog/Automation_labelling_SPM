@@ -8,8 +8,9 @@ from sqlalchemy import engine_from_config, pool
 from app.config import get_settings
 from app.db import Base
 
-# Import model modules here so their tables register on Base.metadata before
-# autogenerate runs (task #2 adds the first models module).
+# Imported for its side effect of registering tables on Base.metadata before
+# autogenerate/create_all runs below - not otherwise referenced in this file.
+import app.models.db_models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
