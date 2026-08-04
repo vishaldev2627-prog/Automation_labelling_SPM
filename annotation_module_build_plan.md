@@ -209,21 +209,24 @@ annotations feed export) are exactly right and must survive every later phase.
 > are **explicitly out of scope now**. Do not silently drop them — carry as a named backlog so
 > the annotation module can extend to them without a rebuild.
 
-### Phase 4 — QA / audit layer `New — safety-critical` — sign-off + audit sampling shipped
+### Phase 4 — QA / audit layer `New — safety-critical` — sign-off + audit sampling + export gate shipped
 
 The phase the current tool lacks, and the one that matters most given the target: undercarriage
 and wheel defects on operating trains. One annotator's mistake propagated onto near-duplicate
 frames, then into training data, is a **safety** risk here, not a quality nuisance.
 
-- **✅ Second-reviewer sign-off — mechanism shipped, not yet wired to gate export.**
+- **✅ Second-reviewer sign-off — shipped and wired into export gating.**
   `annotation_reviews` (append-only) records reviewer/decision/reason per image via
   `POST /api/review/{image_id}`; the second reviewer must differ from whoever submitted the
   annotation (`annotation_state.updated_by_id`), enforced server-side — except for historical/
   backfilled data with no known submitter, which isn't blocked against an unknown person.
-  `GET /api/review/pending` lists completed-but-unreviewed images. **Deliberately not yet wired
-  into `completed`/export gating** — retroactively requiring approval for the ~1760 images
-  already completed under the old single-save semantics is a product-owner workflow call, not
-  an engineering one to make silently. That decision is still open.
+  `GET /api/review/pending` lists images that still need one to become export-eligible.
+  **Product-owner decision made: grandfather existing, gate new.** `ExportGateExemption` is a
+  one-time snapshot (taken by the migration that introduces it) of every image completed before
+  this gate went live — those stay exportable with no retroactive review required. Anything that
+  becomes `completed` from that point on needs its *latest* review to be `"approved"` before
+  `export_service.py` will include it (a later rejection after an earlier approval correctly
+  un-approves it). `POST /api/export`'s response gained a `needs_review` count.
 - **✅ Mandatory audit sample (5–10%) of *propagated* annotations — shipped.**
   `GET /api/review/audit-sample` draws a stable 7.5%-seeded random sample of completed images
   containing propagated objects, excluding ones already sampled. Reviewed the same way as
