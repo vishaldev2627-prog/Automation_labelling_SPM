@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 
 from app.db import SessionLocal
-from app.models.schemas import ReviewRecord, SubmitReviewRequest, TriageItem
+from app.models.schemas import ClassAuditStats, ReviewRecord, SubmitReviewRequest, TriageItem
 from app.services import review_service
 from app.services.dataset_service import DatasetNotFoundError, get_dataset_service
 from app.services.review_service import VALID_DECISIONS, VALID_REASONS
@@ -35,6 +35,31 @@ def get_audit_sample() -> list[TriageItem]:
     db = SessionLocal()
     try:
         return review_service.get_audit_sample(db, ds)
+    except DatasetNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    finally:
+        db.close()
+
+
+@router.get("/class-stats", response_model=list[ClassAuditStats])
+def get_class_stats() -> list[ClassAuditStats]:
+    """Must be declared before GET /{image_id} - FastAPI matches routes in
+    order, and {image_id} would otherwise greedily swallow this path."""
+    ds = get_dataset_service()
+    db = SessionLocal()
+    try:
+        stats = review_service.get_class_audit_stats(db, ds)
+        return [
+            ClassAuditStats(
+                class_id=c.class_id,
+                name=c.name,
+                safety_critical=c.safety_critical,
+                reviewed=stats.get(str(c.class_id), {}).get("reviewed", 0),
+                approved=stats.get(str(c.class_id), {}).get("approved", 0),
+                rejected=stats.get(str(c.class_id), {}).get("rejected", 0),
+            )
+            for c in ds.get_classes()
+        ]
     except DatasetNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     finally:

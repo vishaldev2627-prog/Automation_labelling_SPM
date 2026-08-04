@@ -154,6 +154,45 @@ def get_export_eligible_ids(db: Session, dataset_key: str, image_ids: list[str])
     return exempt | approved
 
 
+def get_class_audit_stats(db: Session, ds: DatasetService) -> dict[str, dict[str, int]]:
+    """Per class_id (as str, matching DatasetService._colors/_safety's own
+    keying), how many audit_sample reviews touched an image containing that
+    class, and how many were approved vs rejected. This is the measured-
+    accuracy signal auto_accept_service.py requires before trusting a class
+    at all - see plan §4.3 ("driven by *measured* accuracy, not hope").
+
+    Conservative by construction: a rejection on a multi-object image
+    counts against *every* class in that image, not just whichever object
+    was actually wrong (we don't know which one caused the rejection from
+    the review record alone) - this under-trusts a class rather than
+    over-trusts one, which is the correct direction of error for something
+    that gates skipping human review.
+    """
+    dataset_key = ds.dataset_key
+    rows = db.execute(
+        select(AnnotationReview.image_id, AnnotationReview.decision).where(
+            AnnotationReview.dataset_view == dataset_key, AnnotationReview.reason == "audit_sample"
+        )
+    ).all()
+    if not rows:
+        return {}
+
+    image_ids = list({image_id for image_id, _ in rows})
+    states = ds.get_saved_states(image_ids)
+
+    stats: dict[str, dict[str, int]] = {}
+    for image_id, decision in rows:
+        state = states.get(image_id)
+        if not state:
+            continue
+        class_ids_in_image = {str(o["class_id"]) for o in state.get("objects", []) if "class_id" in o}
+        for class_id in class_ids_in_image:
+            entry = stats.setdefault(class_id, {"reviewed": 0, "approved": 0, "rejected": 0})
+            entry["reviewed"] += 1
+            entry[decision] += 1
+    return stats
+
+
 def get_audit_sample(db: Session, ds: DatasetService, sample_rate: float = AUDIT_SAMPLE_RATE) -> list[TriageItem]:
     """A stable random sample of completed images containing propagated
     objects (source == "propagated"), excluding ones already audit-sampled.

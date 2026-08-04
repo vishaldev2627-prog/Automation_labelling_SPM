@@ -221,6 +221,15 @@ class SubmitReviewRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class ClassAuditStats(BaseModel):
+    class_id: int
+    name: str
+    safety_critical: bool
+    reviewed: int
+    approved: int
+    rejected: int
+
+
 class ReviewRecord(BaseModel):
     id: int
     image_id: str
