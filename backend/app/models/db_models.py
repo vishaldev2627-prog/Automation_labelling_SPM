@@ -108,13 +108,12 @@ class AnnotationReview(Base):
     but specifically the second-reviewer's decision, not every save - the
     plan's "one save = done" gap this tool used to have.
 
-    Deliberately NOT yet wired into export/`completed` gating
-    (dataset_service.py, export_service.py) - retroactively requiring
-    approval for the ~1760 images already marked completed under the old
-    single-save semantics is a workflow decision for the product owner,
-    not something to flip silently. This table exists and is queryable
-    (see review_service.py) so that decision can be made without a rebuild
-    once it's made.
+    Wired into export gating (export_service.py) alongside ExportGateExemption
+    below: an image is export-eligible if it's exempt (grandfathered) OR its
+    *latest* review decision is "approved". A later "rejected" review after
+    an "approved" one correctly un-approves it - see review_service.py's
+    get_export_eligible_ids, which always takes the latest decision, not
+    "any approval ever."
     """
 
     __tablename__ = "annotation_reviews"
@@ -129,6 +128,25 @@ class AnnotationReview(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     reviewer: Mapped["Annotator"] = relationship()
+
+
+class ExportGateExemption(Base):
+    """Grandfather list for the second-reviewer export gate: images that
+    were already `completed` before this gate went live don't need a
+    retroactive review to stay exportable (product-owner decision, see
+    annotation_module_build_plan.md Phase 4/§5) - only images that become
+    `completed` from here on need an approved AnnotationReview.
+
+    Populated once, by the migration that introduces this table, as a
+    snapshot of every completed image at that moment - not maintained
+    afterward. A row existing here means "exempt," nothing more; there is
+    no code path that inserts into this table after the migration.
+    """
+
+    __tablename__ = "export_gate_exemptions"
+
+    dataset_view: Mapped[str] = mapped_column(String, primary_key=True)
+    image_id: Mapped[str] = mapped_column(String, primary_key=True)
 
 
 class DatasetClass(Base):
