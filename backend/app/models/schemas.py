@@ -1,6 +1,7 @@
 """Pydantic models shared across the API."""
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Optional
 
@@ -211,6 +212,23 @@ class TriageQueue(BaseModel):
     low_confidence: list[TriageItem] = Field(default_factory=list)
     novel: list[TriageItem] = Field(default_factory=list)
     routine: list[TriageItem] = Field(default_factory=list)
+
+
+class SubmitReviewRequest(BaseModel):
+    decision: str  # "approved" | "rejected"
+    reason: str = "second_review"  # "second_review" | "audit_sample"
+    notes: Optional[str] = None
+
+
+class ReviewRecord(BaseModel):
+    id: int
+    image_id: str
+    reviewer_id: int
+    reviewer_name: str
+    decision: str
+    reason: str
+    notes: Optional[str] = None
+    created_at: datetime
 
 
 class SimilarityIndexStatus(BaseModel):

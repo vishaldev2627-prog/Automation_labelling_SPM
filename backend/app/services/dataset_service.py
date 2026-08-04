@@ -379,6 +379,13 @@ class DatasetService:
         return round(avg * remaining, 1)
 
     @property
+    def dataset_key(self) -> str:
+        """The resolved dataset root path - the DB key annotation_state,
+        annotation_reviews, and dataset_classes are all keyed by."""
+        self.require_loaded()
+        return self._dataset_key
+
+    @property
     def labels_dir(self) -> Path:
         self.require_loaded()
         return self._labels_dir

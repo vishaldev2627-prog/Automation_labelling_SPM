@@ -102,6 +102,35 @@ class AnnotationHistory(Base):
     annotator: Mapped["Annotator | None"] = relationship()
 
 
+class AnnotationReview(Base):
+    """Second-reviewer sign-off (Phase 4, safety-critical QA layer - see
+    annotation_module_build_plan.md). Append-only, like AnnotationHistory,
+    but specifically the second-reviewer's decision, not every save - the
+    plan's "one save = done" gap this tool used to have.
+
+    Deliberately NOT yet wired into export/`completed` gating
+    (dataset_service.py, export_service.py) - retroactively requiring
+    approval for the ~1760 images already marked completed under the old
+    single-save semantics is a workflow decision for the product owner,
+    not something to flip silently. This table exists and is queryable
+    (see review_service.py) so that decision can be made without a rebuild
+    once it's made.
+    """
+
+    __tablename__ = "annotation_reviews"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    dataset_view: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    image_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    reviewer_id: Mapped[int] = mapped_column(ForeignKey("annotators.id"), nullable=False)
+    decision: Mapped[str] = mapped_column(String, nullable=False)  # "approved" | "rejected"
+    reason: Mapped[str] = mapped_column(String, nullable=False)  # "second_review" | "audit_sample"
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    reviewer: Mapped["Annotator"] = relationship()
+
+
 class DatasetClass(Base):
     """One class definition (id/name/color) for one dataset view - replaces
     `_meta.json`'s {"classes": [...], "colors": {...}} and is the DB source
