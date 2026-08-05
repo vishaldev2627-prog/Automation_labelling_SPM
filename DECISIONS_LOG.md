@@ -216,7 +216,9 @@ LHB and absent on ICF.
 | W-4 coach_type | **done** |
 | M1 class-map versioning + exclude_classes enforcement | **done** (migration `b7e3d81a45c2`) |
 | M2 content-addressed dataset snapshots + manifest | **done** (migration `c92a5f14d8e0`, adds `boto3`) |
-| W-5 log-polar at export | not started — belongs after M2 |
+| M3 split-integrity enforcement | **done** (no migration — `export_service.py` only) |
+| M4 golden eval set storage + permission gate | **done**, structure only (migration `d5a7c0f3e8b1`) — population blocked on named domain experts to curate |
+| W-5 log-polar at export | **done** (no migration — export-time transform only) |
 | M0.3 host-path `dataset_key` | parked, needs a `pg_dump` on the deploy host first |
 
 **M1 as built.** `class_map_versions` is immutable and content-addressed: a
@@ -282,8 +284,155 @@ it is a content hash.
 Manifest reports the uncomfortable numbers deliberately:
 `provenance.grandfathered_unreviewed_images` (non-zero ⇒ a model trained on this snapshot cannot claim
 all data was second-reviewed), `split_integrity` counts, and `spine_stamp_coverage` publishing its
-zeros. **Split integrity is measured, not yet enforced** — M3 turns a violation into a refusal and
-fixes the split; M2 records it so the manifest cannot claim a compliance it does not have.
+zeros. Split integrity was *measured but not enforced* at the time M2 shipped — M3, below, closes
+that gap.
+
+**M3 as built.** `pipeline.md`'s retrain rule (via `FINAL_AIML_ARCHITECTURE` §12): pseudo/synthetic
+(propagated) and auto-accepted labels go to train only, never valid/test. M2 recorded a violation
+honestly; M3 makes one structurally impossible instead of recording it.
+
+`ExportService._enforce_split_integrity` is the per-image decision: an image's deterministic
+hash-based split (`_split_for`) is overridden to `train` whenever it carries a propagated label or is
+auto-accepted, regardless of which bucket its hash landed in. Pulled out as its own pure
+staticmethod — no Postgres, no filesystem — specifically so the enforcement rule is unit-testable in
+isolation rather than only reachable through the full DB-backed export path. Every override is logged
+at `warning`, per the plan's own risk note: forcing a re-split changes what a previously-exported
+split assignment meant for that image, and that must never happen silently.
+
+The pre-existing `pseudo_synthetic_in_val_or_test` / `auto_accepted_in_val_or_test` manifest counters
+are kept rather than removed — with enforcement in place they should always read 0, so a nonzero value
+is now a bug signal rather than an expected measurement. Two new counters,
+`pseudo_synthetic_forced_to_train` / `auto_accepted_forced_to_train`, record how many images the
+forcing pass actually redirected, so a manifest reading all-zeros is legible as "nothing needed
+enforcing" rather than "enforcement didn't run".
+
+`ExportService._finalize_snapshot` additionally refuses to finalize — raising `SplitIntegrityViolation`,
+surfaced as HTTP 422 — if a snapshot's stats ever report a violation despite the forcing pass. This
+should be unreachable in practice; it exists because a snapshot is the immutable, MLflow-tracked
+handoff artifact, so on this one specific check "should never happen" gets a hard refusal rather than
+a logged warning. The check runs before any snapshot file is written, so a violation costs nothing to
+recover from. Scoped to snapshot mode only (`as_snapshot=true`) — `as_snapshot=false`'s mutable
+in-place write was already the lower-stakes path M2 chose not to gate.
+
+Verified against the real API, not just unit tests: an image engineered to hash into `val` was given a
+`source: propagated` object, exported, and landed in `images/train/` on disk with
+`pseudo_synthetic_forced_to_train: 1` in both the API response and the written manifest — no
+`images/val/` directory was created at all for that export.
+
+No migration — this milestone is entirely `export_service.py`/`routers/export.py` logic, nothing
+persisted differently.
+
+**M4 as built — structure and permission gate only, per D-Q4: "the storage and permission gate can be
+built now; the set cannot be filled without [named domain experts to curate]."** Nothing here
+populates a golden set with real images; it builds the mechanism so curation can start the moment
+those experts are named, instead of retrofitting a permission concept onto data that already exists.
+
+Two new tables, migration `d5a7c0f3e8b1`: `golden_sets` (one row per curated version, append-only —
+mirrors `class_map_versions`' "a curation round mints a new version, never edits an old one's items")
+and `golden_set_items` (which `image_id`s are in which version). `golden_repo.get_golden_image_ids`
+reads **across all versions**, not just the latest, deliberately: once an image is golden it stays
+disjoint from every export split permanently, not just until the next curation round.
+
+`golden_curator` was already a recognized role — `app/services/annotator_service.VALID_ROLES` and the
+`Annotator.role` column both predate this work, added during Phase 1a specifically so this day would
+not need a role system retrofitted onto live data. M4 is the first thing that actually checks it:
+`golden_service.require_golden_curator` 403s any write from a non-curator, and the actual predicate
+(`_is_golden_curator`) is a pure function of an already-fetched `Annotator` — pulled out the same way
+M3's `_enforce_split_integrity` was, so the permission rule is unit-testable without a database. Reads
+(listing sets/items) stay open, consistent with the rest of this tool's identity system having no real
+login — there's nothing sensitive in knowing a golden set exists, only in writing to one.
+
+Storage is a **separate MinIO bucket** (`vb-golden-eval-set`, not a prefix under the snapshot store's
+`vb-dataset-snapshots`), per the build plan's explicit requirement: "structurally separate storage, not
+a flag on shared storage," because the only contamination mitigation that counts is that no
+export/propagation/triage path can reach it at all. A prefix under a shared bucket is still one IAM
+boundary an export path could accidentally cross; a separate bucket cannot be, short of explicitly
+being handed its credentials. Freezing an item's image+label bytes to that bucket
+(`object_store.freeze_golden_item`) is best-effort and non-fatal, same contract as M2's snapshot
+publish — a curator's "this image is golden" decision is recorded in the DB regardless of whether the
+object-store copy succeeds, because that decision must not be lost to a transient MinIO outage.
+
+Two enforcement points, both load-bearing (the build plan: "assert it in tests"):
+
+1. **Export.** `export_service._write_dataset` now fetches `golden_repo.get_golden_image_ids` in the
+   same DB round-trip as the existing provenance queries and drops any matching `image_id` from
+   `exportable` entirely, before the completion/review-gate checks even run — a golden image belongs
+   in neither train nor val of a training export, which is a harder exclusion than M3's "push into
+   train only." The pre-existing `golden_ids_in_any_split` manifest counter (hardcoded `0` since M2,
+   with a comment that no golden storage existed yet) is now a real invariant check: it should always
+   read `0` by construction, same "nonzero is a bug signal" pattern M3 established for its two
+   counters, and `_finalize_snapshot`'s existing refusal already covers it. `golden_set_storage_exists`
+   flips from a hardcoded `False` to reflecting whether this view actually has a golden set.
+2. **Propagation.** `propagation_service._propagate_to` checks `golden_repo.is_golden_image` before
+   `_is_untouched`, so a golden image that happens to also look untouched is still refused, not just
+   deprioritized. Propagation is an automation writing into an image no human necessarily reviewed
+   yet — exactly the path that must never be allowed near the ruler nothing trains on.
+
+Verified against the real API and the real dev-DB propagation log, not just unit tests, after finding
+and fixing a real bug this way: `dataset_view` is not the short view name ("side_view") anywhere else
+in this codebase, it's `DatasetService.dataset_key` — the resolved absolute dataset path. Every other
+write path (`export.py`, `review.py`) derives it server-side from whichever dataset is currently
+loaded rather than trusting a client-supplied string. The first `golden.py` draft took `dataset_view`
+as a request field, and a live test against it silently created a golden set keyed by the string
+`"side_view"` while the export path was querying by the resolved path — so `golden_images_excluded`
+read `0` even with a real golden item on disk. Fixed by removing the field entirely and deriving it
+from `get_dataset_service().dataset_key`, matching `export.py`'s own pattern; `add_items` additionally
+refuses (409) if the currently loaded view doesn't match the golden set's own recorded view, so the
+same class of mismatch can't silently freeze the wrong images under the wrong version. Re-verified
+after the fix: a 403 for a plain annotator, a successful curator write, an export that produced
+`golden_images_excluded: 1` with the golden image genuinely absent from the exported bytes on disk,
+and a propagation attempt that logged `"Propagation into <id> refused: image is in the golden eval
+set"` and left the image's original objects untouched.
+
+**W-5 as built.** `pipeline.md` §5.5's wheel-shelling segmentation runs on a log-polar unwrapped wheel
+crop - a coordinate transform parameterised by circle center, radius, and output size. D-Q5's
+Consequence C-4 is the reason this is a milestone and not just a helper function: a mask drawn
+*directly* in unwrapped space is meaningless the moment those parameters change, and our wheel
+geometry constants are explicitly provisional ("wheel specs are to be considered in your own accord
+for now"). So annotation stays in raw frame space, and the unwrap is generated fresh at every export
+from current parameters - a spec change becomes a re-export, not a re-annotation of every wheel.
+
+Two new pieces, both pure/filesystem-only, no migration:
+
+- `log_polar_service.find_wheel_circle` seeds the circle from the annotated `wheel`-class object's own
+  bbox in *that* frame, not a fixed pixel constant - deliberately different from `pipeline.md` §5.5's
+  own production method ("circle seeded from fixed geometry + known diameter, not blind Hough"), which
+  describes seeding for raw camera frames with no human in the loop. This tool has a human-drawn wheel
+  outline already, and a fixed pixel radius would be wrong the instant camera distance/zoom varies
+  between frames - there is no camera calibration yet to convert a real-world diameter into a per-frame
+  pixel radius (`FINAL_AIML_ARCHITECTURE` §16, still open). `config.py`'s new `wheel_unwrap_*` settings
+  are marked "not certified, engineering placeholder" - the same treatment `safety_critical`'s keyword
+  seed already carries - and control only padding/output resolution, never a wheel diameter in mm, so
+  there is no false claim of an authoritative wheel spec to walk back later.
+- `log_polar_service.unwrap_log_polar` wraps `cv2.warpPolar`. Its axis convention turned out to be
+  undocumented and counter-intuitive: `dsize=(w, h)` maps `w` to the *radius* axis and `h` to the
+  *angle* axis of the output - confirmed empirically with a single known point (radius=50, angle=0)
+  landing exactly where the math predicts, only after an initial synthetic-wedge test gave misleading
+  full-range results (the wedge straddled the 0°/360° wrap boundary, which looks like "no angular
+  structure" if you don't already know to check for that). Getting the swap+transpose wrong would have
+  silently produced a tall narrow image instead of `pipeline.md`'s "flat strip" - pinned by a unit test
+  asserting a constant-radius ring lands in a narrow *horizontal* band, not vertical.
+
+`export_service._write_wheel_unwraps` runs per image, skipping (not guessing) when there's no annotated
+wheel object or nothing fine_structure to unwrap - an unwrap with nothing on it isn't useful training
+data. Writes `logpolar/<split>/images/<image_id>.png` (the unwrapped strip) and one
+`logpolar/<split>/masks/<image_id>__class{id}.png` per fine_structure class present, mirroring W-3's
+raw-space `masks/` layout. The manifest's new `wheel_unwrap` block records exactly which version and
+parameters produced those files - `certified: false` is load-bearing, not decoration, matching how
+W-3's per-class rasterization shares logic with this via the new `_fine_structure_masks_by_class` helper
+(pulled out of `_write_fine_structure_masks` so both consumers rasterize identically rather than risking
+drift between two copies of the same fill-polygon loop).
+
+Verified against the real API on a synthetic wheel image (no real wheel-shelling footage exists yet -
+the view starts empty, per README.md): a `wheel` class and a `shelling` class both classified correctly
+by the existing safety_critical/fine_structure keyword seeding without any code change, an export that
+produced `wheel_unwraps: 1` and the full versioned params block, and the unwrapped mask file's nonzero
+pixels landing at the *exact* row predicted by OpenCV's own log-polar formula
+(`row = (out_height / ln(maxRadius)) * ln(r)`) for the shelling polygon's true distance from the wheel
+center - not just "a mask exists", but its position is mathematically exactly where the transform should
+put it. An initial linear-radius sanity check flagged what looked like a discrepancy; recomputing with
+the log-scale formula (since `wheel_unwrap_log_scale` defaults `true`) matched the observed pixels to
+within a fraction of a row, closing out the check rather than leaving it as an unexplained gap.
 
 W-1 through W-4 slot into milestones M1–M2. W-5 belongs with the wheel work, after M2. None of them
 change the M0–M4 shape already approved.
