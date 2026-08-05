@@ -31,7 +31,8 @@ from typing import Optional
 
 from app.config import get_settings
 from app.models.schemas import BoundingBox, DetectorInfo, DetectorTrainJobStatus, ObjectStatus
-from app.services import gpu_scheduler, mlflow_tracking
+from app.db import SessionLocal
+from app.services import golden_eval_service, golden_repo, gpu_scheduler, mlflow_tracking
 from app.services.dataset_service import DatasetNotFoundError, DatasetService
 from app.utils.file_utils import atomic_write_json, new_id, read_json
 
@@ -392,6 +393,43 @@ class DetectorService:
             with self._lock:
                 self._loaded_model = None
                 self._loaded_model_path = None
+
+            # M6: score the freshly trained model against the golden set, if
+            # one exists for this view - closes the loop M5 opened. Without
+            # this, a tracked run only shows train/val metrics from a
+            # random hash-based split of whatever was completed, never
+            # scored against the set nothing trains on. Best-effort and
+            # non-fatal: a golden-eval failure must never turn an otherwise
+            # successful training run into a reported failure.
+            if settings.auto_eval_on_golden_set:
+                try:
+                    db = SessionLocal()
+                    try:
+                        golden_ids = golden_repo.get_golden_image_ids(db, self._ds.dataset_key)
+                    finally:
+                        db.close()
+                    if golden_ids:
+                        eval_result = golden_eval_service.evaluate_on_golden_set(
+                            self._ds, golden_ids, dest, classes, staging_dir
+                        )
+                        if eval_result and tracked:
+                            golden_metrics = {
+                                f"golden/aggregate_{k}": v for k, v in eval_result["aggregate"].items()
+                            }
+                            for class_id, m in eval_result["per_class"].items():
+                                golden_metrics.update(
+                                    {f"golden/class{class_id}_{k}": v for k, v in m.items()}
+                                )
+                            mlflow_tracking.log_metrics(golden_metrics, step=EPOCHS)
+                            mlflow_tracking.set_tags(
+                                {"golden_eval_images": str(eval_result["num_golden_images"])}
+                            )
+                    else:
+                        logger.info(
+                            "No golden set yet for %s; skipping M6 eval for this run", self._ds.dataset_key
+                        )
+                except Exception:
+                    logger.exception("Golden-set evaluation failed; training result is unaffected")
 
             if tracked:
                 # Logged before the finally-block rmtree below deletes

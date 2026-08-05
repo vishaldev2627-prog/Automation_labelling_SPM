@@ -539,6 +539,30 @@ params, the `trigger`/`dataset_key`/`mode`/`detector_version` tags, and all 19 t
 (`results.csv`, both confusion matrices, PR/F1/P/R curves, `args.yaml`, weights/) - confirming the P-7
 fix actually works, not just that it compiles.
 
+**M6 — evaluate against the golden set, added after M5/M8 shipped.** Before this, a tracked training
+run only showed train/val metrics from a random hash-based split of whatever was completed - never
+scored against the golden set (populated earlier this session, 200 images), which was sitting unused.
+Closes that gap: `golden_eval_service.py` builds a val-only YOLO dataset from the golden set's
+*current* annotation state (not a frozen copy - the MinIO freeze from M4 is best-effort and typically
+unconfigured in dev, so what's structurally guaranteed is that these image_ids never appear in a
+*training* split, not that this eval call reads through a separately-frozen path), runs the freshly
+trained model against it via ultralytics' own `model.val()`, and logs the result onto the *same*
+MLflow run as the training metrics - one run tells the whole story.
+
+**Per-class, never aggregate-only** - the same principle this codebase already applies everywhere
+else (per_class_counts, safety_critical gating): an aggregate mAP can rise while one safety-critical
+class quietly regresses. Every class present in the golden set gets its own logged
+precision/recall/mAP50/mAP50-95; `golden_eval_images` is tagged on the run so it's visible how many of
+the golden set's images were actually evaluable. Best-effort and gated: skips cleanly (not an error)
+for a view with no golden set yet, and a golden-eval failure can never turn a successful training run
+into a reported failure.
+
+Verified live against the real 200-image golden set (not a synthetic sample): a real training run
+produced 124 `golden/*` metrics in MLflow - aggregate plus per-class precision/recall/mAP50/mAP50-95
+for all 30 classes - with `golden_eval_images: 200` confirming the full golden set was scored. The
+near-zero scores are the expected, honest result of a model trained on only 5 images, not a bug in the
+eval path.
+
 Two real bugs found and fixed only because this was run for real rather than left as "should work":
 
 1. **ultralytics ships its own built-in MLflow integration**, auto-enabled the instant `mlflow` is

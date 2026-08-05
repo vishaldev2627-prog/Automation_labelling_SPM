@@ -139,6 +139,14 @@ class Settings(BaseSettings):
     gpu_wait_max_seconds: int = 600
     gpu_wait_poll_seconds: int = 5
 
+    # M6: score a just-trained detector against the golden set (if one
+    # exists for the view) and log the result onto the same MLflow run -
+    # per-class, never aggregate-only, see golden_eval_service.py. Skips
+    # cleanly (not an error) for a view with no golden set yet. Best-effort:
+    # an eval failure never turns a successful training run into a
+    # reported failure.
+    auto_eval_on_golden_set: bool = True
+
     # Logging
     log_level: str = "INFO"
     log_file: str = "../logs/backend.log"
