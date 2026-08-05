@@ -126,6 +126,19 @@ class Settings(BaseSettings):
     # training can't start (see the try/except around it).
     auto_train_on_handoff: bool = True
 
+    # M8 GPU-scheduling guard: "inference always wins" - see
+    # gpu_scheduler.py. Training waits (polling every gpu_wait_poll_seconds)
+    # for SAM2 to go idle before its GPU-heavy model.train() call starts,
+    # rather than barging in on live annotators. gpu_wait_max_seconds bounds
+    # that wait - past it, the job is marked "skipped" (not "failed": no
+    # data or code was wrong, the GPU just stayed busy) rather than parking
+    # a background thread indefinitely. This is what makes
+    # auto_train_on_handoff safe to enable in a live multi-annotator
+    # deployment - without it, almost any handoff could trigger a real,
+    # long-running training run competing with SAM2 on the same GPU.
+    gpu_wait_max_seconds: int = 600
+    gpu_wait_poll_seconds: int = 5
+
     # Logging
     log_level: str = "INFO"
     log_file: str = "../logs/backend.log"

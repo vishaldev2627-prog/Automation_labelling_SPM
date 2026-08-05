@@ -394,8 +394,8 @@ class SnapshotInfo(BaseModel):
 
 class DetectorTrainJobStatus(BaseModel):
     job_id: str
-    status: str  # "running" | "completed" | "failed"
-    stage: str = "preparing"  # "preparing" | "training" | "saving" | "done"
+    status: str  # "running" | "completed" | "failed" | "skipped" (M8 GPU-busy deferral, not a failure)
+    stage: str = "preparing"  # "preparing" | "waiting_for_gpu" | "training" | "saving" | "done"
     current_epoch: int = 0
     total_epochs: int = 0
     num_images: int = 0

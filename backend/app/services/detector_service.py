@@ -31,7 +31,7 @@ from typing import Optional
 
 from app.config import get_settings
 from app.models.schemas import BoundingBox, DetectorInfo, DetectorTrainJobStatus, ObjectStatus
-from app.services import mlflow_tracking
+from app.services import gpu_scheduler, mlflow_tracking
 from app.services.dataset_service import DatasetNotFoundError, DatasetService
 from app.utils.file_utils import atomic_write_json, new_id, read_json
 
@@ -277,6 +277,33 @@ class DetectorService:
                 os.environ["MLFLOW_EXPERIMENT_NAME"] = settings.mlflow_experiment_name
 
             device = 0 if torch.cuda.is_available() else "cpu"
+
+            # M8 GPU-scheduling guard: "inference always wins" (see
+            # gpu_scheduler.py's module docstring for the full reasoning).
+            # Only meaningful with an actual GPU to contend over - a
+            # CPU-only deployment has nothing to guard against. Checked
+            # before the MLflow run even starts, so a skipped job never
+            # creates a spurious started-then-abandoned run.
+            if device == 0 and not self._wait_for_gpu_idle(job_id, settings):
+                self._update(
+                    job_id,
+                    status="skipped",
+                    stage="done",
+                    error=(
+                        f"Training deferred: GPU still busy serving SAM2 inference after "
+                        f"{settings.gpu_wait_max_seconds}s (M8 guard, not a failure)"
+                    ),
+                )
+                return
+
+            # Reset explicitly: if _wait_for_gpu_idle ever moved this job to
+            # "waiting_for_gpu", nothing else sets it back before model.train()
+            # starts - leaving a stale "waiting" stage on a job that's
+            # actually training (confirmed live: a job that had genuinely
+            # waited, resumed, and completed all 100 epochs still reported
+            # "waiting_for_gpu" the entire time because of this).
+            self._update(job_id, stage="training")
+
             model = YOLO(MODEL_WEIGHTS)
 
             # M5 (Scope A only - see mlflow_tracking's module docstring):
@@ -384,6 +411,27 @@ class DetectorService:
                 mlflow_tracking.end(status="FAILED")
         finally:
             shutil.rmtree(staging_dir, ignore_errors=True)
+
+    def _wait_for_gpu_idle(self, job_id: str, settings) -> bool:
+        """Block until SAM2 inference goes idle, polling every
+        `gpu_wait_poll_seconds`, up to `gpu_wait_max_seconds` total. Returns
+        False on timeout - the caller marks the job "skipped", not "failed":
+        nothing about the data or the training setup was wrong, the GPU
+        just stayed busy with live annotator traffic for longer than this
+        job was willing to wait.
+        """
+        waited = 0
+        while gpu_scheduler.is_gpu_busy():
+            if waited >= settings.gpu_wait_max_seconds:
+                logger.warning(
+                    "Training job %s deferred: GPU still busy with SAM2 inference after %ds",
+                    job_id, waited,
+                )
+                return False
+            self._update(job_id, stage="waiting_for_gpu")
+            time.sleep(settings.gpu_wait_poll_seconds)
+            waited += settings.gpu_wait_poll_seconds
+        return True
 
     def _assemble_dataset(self, staging_dir: Path, classes: list[str]) -> tuple[Path, int]:
         """Write a fresh YOLO-detection dataset from images you've reviewed and

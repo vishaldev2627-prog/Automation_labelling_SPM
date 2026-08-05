@@ -14,6 +14,8 @@ from typing import Optional
 
 import numpy as np
 
+from app.services import gpu_scheduler
+
 logger = logging.getLogger(__name__)
 
 
@@ -153,7 +155,7 @@ class SAMService:
         """Compute (or reuse cached) image embeddings for the given image."""
         if not self.is_available:
             raise SAMNotAvailableError(self._init_error or "SAM model unavailable")
-        with self._lock:
+        with gpu_scheduler.track_inference(), self._lock:
             self._set_image_locked(image_rgb, cache_key)
 
     def predict_box(
@@ -183,7 +185,7 @@ class SAMService:
         # this call before predict() ran, silently producing a mask for the
         # wrong image. Single GPU anyway, so serializing the whole thing costs
         # nothing extra in practice.
-        with self._lock:
+        with gpu_scheduler.track_inference(), self._lock:
             self._set_image_locked(image_rgb, cache_key)
             masks, scores, _ = self._predictor.predict(
                 point_coords=point_coords,
@@ -209,7 +211,7 @@ class SAMService:
         point_labels = np.array([p[2] for p in pts], dtype=np.int32)
 
         # See predict_box for why set_image + predict share one lock acquisition.
-        with self._lock:
+        with gpu_scheduler.track_inference(), self._lock:
             self._set_image_locked(image_rgb, cache_key)
             masks, scores, _ = self._predictor.predict(
                 point_coords=point_coords,

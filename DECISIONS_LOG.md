@@ -493,12 +493,43 @@ data, so nothing new to train on) finalizes. Gated by `settings.auto_train_on_ha
 `true`), and wrapped so a failure to start training can never fail the export response - the snapshot
 is already safely on disk and recorded by the time this runs.
 
-**Known, deliberately not yet built - the [HIGH] risk this creates:** there is no "inference always
-wins" scheduling (that's M8, not built). `MIN_TRAINING_IMAGES` is only 2, so almost any handoff is
-enough to trigger a real, `EPOCHS=100` GPU training run with nothing yet stopping it from competing
-with SAM2 serving live annotators on the same GPU. `auto_train_on_handoff` defaults on per what was
-asked for, but should not be considered safe to enable in a live multi-annotator deployment until M8's
-GPU-scheduling guard exists.
+**Update: the M8 GPU-scheduling guard now exists**, added specifically so `auto_train_on_handoff`
+could be called safe for a live multi-annotator deployment (it originally shipped without one - see
+below for what that gap looked like). Scope is deliberately the one piece the build plan's own [HIGH]
+risk actually names - "inference always wins" - not the rest of M8 (scheduler, data watcher,
+monitoring), which remain unbuilt and out of scope here.
+
+`gpu_scheduler.py` is a process-wide, in-memory tracker: `track_inference()` wraps every SAM2
+GPU-touching call (`sam_service.py`'s `set_image`/`predict_box`/`predict_points`), and `is_gpu_busy()`
+reports true while any call is in flight or finished within the last 5 seconds - a short grace window
+so a training-start check landing between two clicks from the same annotator doesn't slip through.
+Process-wide rather than per-session because SAM2 itself is deliberately one shared instance across
+all sessions (`sam_service.py`'s own docstring) - "is the GPU busy" has to mean *any* session's
+inference, not whichever session happens to be training.
+
+**Check-before-start, not runtime preemption.** `detector_service._wait_for_gpu_idle` polls
+`is_gpu_busy()` (every `gpu_wait_poll_seconds`, default 5s) right before the GPU-heavy
+`model.train()` call - after dataset assembly, before the MLflow run even starts, so a deferred job
+never creates a spurious started-then-abandoned run. Bounded by `gpu_wait_max_seconds` (default 600s);
+past that, the job is marked **`status: "skipped"`** (a new, distinct status - not `"failed"`, since
+nothing about the data or setup was wrong, the GPU just stayed busy longer than this job was willing
+to wait). Only guards the *start*; true preemption of an already-running training loop is a
+deliberately different, larger problem this doesn't attempt.
+
+Verified live, not just unit-tested: real continuous SAM2 traffic (via the actual
+`/api/generate-mask` endpoint) held a real training job at `stage: "waiting_for_gpu"` for the full
+duration of the traffic, then let it proceed within 9 seconds of the traffic stopping, and the job
+completed all 100 epochs normally. Caught and fixed a real bug in the process: `stage` had nothing
+resetting it from `"waiting_for_gpu"` back to `"training"` once the guard cleared, so a job that had
+genuinely waited, resumed, and finished all 100 epochs still *reported* stuck on "waiting_for_gpu" the
+whole time - purely a status-display bug, training itself was correct throughout, but exactly the
+kind of thing that would have looked like a hang to anyone watching the job.
+
+**What the gap looked like before this existed**, for the record: there was no "inference always
+wins" scheduling. `MIN_TRAINING_IMAGES` is only 2, so almost any handoff was enough to trigger a real,
+`EPOCHS=100` GPU training run with nothing stopping it from competing with SAM2 serving live
+annotators on the same GPU. `auto_train_on_handoff` defaulted on regardless, but was flagged as not
+safe for a live multi-annotator deployment until this guard existed.
 
 **Verified live end-to-end** against a standalone dev MLflow instance (not the docker-compose service,
 which needs the full stack up): a real export against the 2013-image dataset with genuinely
