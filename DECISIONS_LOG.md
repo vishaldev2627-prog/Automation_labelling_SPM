@@ -440,6 +440,104 @@ change the M0–M4 shape already approved.
 **Agreed build order:** W-2 → W-4 → then W-3 / W-1. W-2 first because a confirmed-empty frame is
 currently dropped at export, so negative samples are being lost *while annotators work*.
 
+## M4 population and M5 — as built (2026-08-05)
+
+**Product decision:** the golden set is populated from the existing, already-verified ~2000-image
+`side_view` dataset, rather than waiting on named domain experts to curate a fresh batch from scratch
+(D-Q4's original blocker). This dataset predates the tool's second-review gate entirely, so
+`annotation_reviews` has no rows for it - the gate can't retroactively certify data it never saw. A
+curator invoking selection now explicitly opts into treating it as pre-verified
+(`treat_all_labeled_as_reviewed=true`); the default stays `false` so a future, not-yet-verified
+dataset doesn't silently get the same pass.
+
+**`golden_selection.py`** (new, pure): `propose_golden_candidates` is a greedy set-cover, not a fixed
+per-class quota loop - at each step it picks whichever remaining image covers the most still-
+outstanding class minimums, so reaching every class's coverage floor doesn't cost more images than it
+has to. Safety-critical classes are weighted 2x in that scoring, so a tie is broken in their favor -
+an early `target_count` cutoff should never leave a safety-relevant class at zero coverage while a
+cosmetic class already has its full share. `golden_service.propose_candidates` is the thin DB-facing
+wrapper (image list + per-class safety flags + second-review status); it only *proposes* - a curator
+still commits via the existing `create_version`/`add_items` (M4), same permission gate as any other
+write.
+
+Executed for real, not just tested: proposed 200 images from the real 2013-image `side_view` dataset
+(min 5 per class, all 30 classes covered), created golden set version 1 for that view, and added all
+200 items via the real curator API. Verified against the real data at this scale, not a
+5-image sample: a subsequent export reported `golden_images_excluded: 200`, and none of the 200
+golden image ids appear anywhere in the exported files on disk. This population currently lives in
+local dev only - it needs migration `d5a7c0f3e8b1` applied on the deploy host before the same
+population can happen against production (same prerequisite M0.3 already needs).
+
+**M5 — MLflow tracking for the in-tool pre-labeler (Scope A only).** Per Q-C, this is **never** the
+pipeline team's own 8 production families - a separate, low-stakes tracking server for the SAM2/YOLO
+helper that suggests boxes to annotators, wired into the *existing* `DetectorService._run_training`.
+
+`mlflow_tracking.py` (new) is individually-best-effort per call, deliberately not one context manager
+wrapping the whole training body - a single wrapping `with mlflow.start_run():` risks either
+mislabeling a real training failure as an MLflow problem, or the opposite mistake: an MLflow
+connectivity blip at `__exit__` marking an otherwise-successful run as failed. Every call
+(`start`/`log_params`/`log_metrics`/`log_artifact(s)`/`end`) degrades on its own instead, matching the
+"never fail the primary action" contract `object_store.py` already established for snapshot
+publishing - a deployment that never sets `MLFLOW_TRACKING_URI` needs no reachable server at all,
+training just runs untracked.
+
+Fixes the P-7 bug the gap-analysis flagged: training artifacts (`results.csv`, PR curve, confusion
+matrix) were previously silently deleted by `_run_training`'s own `finally: shutil.rmtree(staging_dir)`
+with nothing ever having read them - only `best.pt` was copied out first. `mlflow_tracking.log_artifacts`
+now runs on the success path before that rmtree.
+
+**Auto-trigger (M9-adjacent):** `export_service._finalize_snapshot` now kicks off
+`DetectorService.start_training(trigger="export_handoff")` automatically whenever a snapshot
+**genuinely new** (`created=True` - M2's content-addressing already dedupes a re-export of unchanged
+data, so nothing new to train on) finalizes. Gated by `settings.auto_train_on_handoff` (default
+`true`), and wrapped so a failure to start training can never fail the export response - the snapshot
+is already safely on disk and recorded by the time this runs.
+
+**Known, deliberately not yet built - the [HIGH] risk this creates:** there is no "inference always
+wins" scheduling (that's M8, not built). `MIN_TRAINING_IMAGES` is only 2, so almost any handoff is
+enough to trigger a real, `EPOCHS=100` GPU training run with nothing yet stopping it from competing
+with SAM2 serving live annotators on the same GPU. `auto_train_on_handoff` defaults on per what was
+asked for, but should not be considered safe to enable in a live multi-annotator deployment until M8's
+GPU-scheduling guard exists.
+
+**Verified live end-to-end** against a standalone dev MLflow instance (not the docker-compose service,
+which needs the full stack up): a real export against the 2013-image dataset with genuinely
+completed, labeled images auto-triggered training (`auto_train_job_id` returned in the export
+response), and the resulting run in MLflow shows `status: FINISHED`, all 13 per-epoch metrics, 119
+params, the `trigger`/`dataset_key`/`mode`/`detector_version` tags, and all 19 training artifacts
+(`results.csv`, both confusion matrices, PR/F1/P/R curves, `args.yaml`, weights/) - confirming the P-7
+fix actually works, not just that it compiles.
+
+Two real bugs found and fixed only because this was run for real rather than left as "should work":
+
+1. **ultralytics ships its own built-in MLflow integration**, auto-enabled the instant `mlflow` is
+   importable (true unconditionally now that `mlflow-skinny` is a hard dependency). It reads
+   `MLFLOW_TRACKING_URI` from `os.environ` directly; this app's `Settings` parses `.env` into its own
+   object without exporting it to the process environment, so ultralytics' callback couldn't see the
+   URI this module's own `mlflow_tracking.start()` had just configured, fell back to a local file-store
+   path, and called `mlflow.set_tracking_uri()` with that fallback *mid-training* - global module state,
+   so it silently redirected every subsequent `log_metrics` call, ours included, off the real server.
+   Fixed by exporting the same URI into `os.environ` in `_run_training` so both this module's calls and
+   ultralytics' own resolve to the identical server (ultralytics then finds our run already active via
+   `mlflow.active_run()` and logs into it rather than starting a competing one). Deliberately **not**
+   fixed by disabling ultralytics' integration via its own `SETTINGS['mlflow']` - that's a *persisted,
+   per-user* JSON file at `~/.config/Ultralytics/settings.json`, shared with any other ultralytics usage
+   on this host outside this app entirely (this host runs the user's own unrelated training scripts) -
+   flipping that off here would have been exactly the kind of unrelated-system side effect this project
+   works to avoid.
+2. **ultralytics' own metric keys carry parentheses** (`metrics/precision(B)`), which MLflow's REST API
+   rejects outright ("Names may only contain alphanumerics, underscores, dashes, periods, spaces and
+   slashes") - every one of this module's own `log_metrics` calls failed on every single epoch, 100/100,
+   silently absorbed by `mlflow_tracking`'s best-effort contract so training itself never noticed or
+   surfaced it. Only caught by actually reading the exception tracebacks the "ignored" log line
+   deliberately still records. Fixed by sanitizing keys (stripping `(`/`)`) before logging, matching
+   ultralytics' own `sanitize_dict` convention for the same values.
+
+Both bugs would have shipped invisibly if this had stopped at "the code runs without raising" - training
+completed successfully both times regardless, precisely because the best-effort contract is designed to
+never let a tracking failure surface as a training failure. The only way to know logging was actually
+working was to check MLflow itself.
+
 ## Decisions taken on our side
 
 - **C-1 condition default = `null` (unassessed).** Not `ok`. Nobody asserted those 2000 components
