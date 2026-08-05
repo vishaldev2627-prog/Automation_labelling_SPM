@@ -47,6 +47,11 @@ sam2_repo/
 # Local dataset(s) used for testing/annotation - not project code
 sample_dataset/
 
+# Standalone dev MLflow instance data (sqlite backend store + local
+# artifacts) - not the docker-compose mlflow service, just a throwaway local
+# container's bind mount for smoke-testing M5 without the full stack up.
+mlflow-dev-data/
+
 # Editor / OS
 .vscode/
 .idea/

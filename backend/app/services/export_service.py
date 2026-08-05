@@ -374,6 +374,24 @@ class ExportService:
         finally:
             db.close()
 
+        # M9/auto-trigger: a genuinely new snapshot is a handoff event - kick
+        # off a Scope A training run for it automatically rather than
+        # waiting for someone to click a button. Only on `created` (M2's
+        # content-addressing already deduplicates a re-export of unchanged
+        # data to the same snapshot_id) - nothing about the data changed, so
+        # there is nothing new to train on. Never allowed to fail the export
+        # itself: the snapshot is already safely on disk and recorded by the
+        # time this runs, same "the primary action already succeeded"
+        # reasoning as the publish call above.
+        auto_train_job_id = None
+        if created and settings.auto_train_on_handoff:
+            try:
+                from app.services.detector_service import get_detector_service
+
+                auto_train_job_id = get_detector_service().start_training(trigger="export_handoff").job_id
+            except Exception:
+                logger.exception("Could not auto-trigger training after snapshot %s", snapshot_id)
+
         stats = dict(stats)
         stats.update(
             {
@@ -383,6 +401,7 @@ class ExportService:
                 "manifest": snapshot_service.MANIFEST_NAME,
                 "file_count": len(file_index),
                 "publish": publish_info,
+                "auto_train_job_id": auto_train_job_id,
                 # Kept at the top level as well as inside the manifest: these are
                 # the two fields anyone hands over or quotes in a ticket.
                 "class_map_version": self._ds.class_map_version,

@@ -31,6 +31,16 @@ boto3==1.35.36
 # annotations; see app/services/detector_service.py)
 ultralytics
 
+# MLflow tracking client (M5, Scope A only - see app/config.py's
+# mlflow_tracking_uri comment). mlflow-skinny, not the full `mlflow` package:
+# it's the tracking/registry client API only (mlflow.start_run, log_param,
+# log_metric, log_artifact, MlflowClient) without the server/UI/full
+# visualization dependency tree - the actual server runs as its own
+# container from the official image (see mlflow/Dockerfile), so this
+# service never needs those extras and the lower dependency footprint means
+# less risk of conflicting with the delicate torch/ultralytics pins above.
+mlflow-skinny==2.16.2
+
 # PyTorch is installed separately in the Dockerfile, from PyTorch's own CUDA
 # wheel index (torch==2.7.1+cu128 / torchvision==0.22.1+cu128), before this
 # file is installed — see the Dockerfile for why. Left out of this file so a

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import random
 import re
 import shutil
@@ -28,7 +29,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from app.config import get_settings
 from app.models.schemas import BoundingBox, DetectorInfo, DetectorTrainJobStatus, ObjectStatus
+from app.services import mlflow_tracking
 from app.services.dataset_service import DatasetNotFoundError, DatasetService
 from app.utils.file_utils import atomic_write_json, new_id, read_json
 
@@ -194,7 +197,11 @@ class DetectorService:
         )
 
     # ------------------------------------------------------------- training
-    def start_training(self) -> DetectorTrainJobStatus:
+    def start_training(self, trigger: str = "manual") -> DetectorTrainJobStatus:
+        """`trigger` is recorded as an MLflow tag only - "manual" (a person
+        clicked the button) vs "export_handoff" (M9/W-auto: kicked off
+        automatically when a snapshot finalizes, see export_service). Purely
+        descriptive; doesn't change how training runs."""
         self._ds.require_loaded()
         job_id = new_id()
         status = DetectorTrainJobStatus(
@@ -207,7 +214,7 @@ class DetectorService:
         )
         with self._lock:
             self._jobs[job_id] = status
-        threading.Thread(target=self._run_training, args=(job_id,), daemon=True).start()
+        threading.Thread(target=self._run_training, args=(job_id, trigger), daemon=True).start()
         return status
 
     def get_job(self, job_id: str) -> Optional[DetectorTrainJobStatus]:
@@ -222,8 +229,10 @@ class DetectorService:
                 setattr(job, key, value)
             job.updated_at = time.time()
 
-    def _run_training(self, job_id: str) -> None:
+    def _run_training(self, job_id: str, trigger: str = "manual") -> None:
         staging_dir = self._models_dir / "training_runs" / job_id
+        tracked = False
+        run_dir = staging_dir / "run"
         try:
             classes = [c.name for c in self._ds.get_classes()]
             data_yaml, num_images = self._assemble_dataset(staging_dir, classes)
@@ -237,8 +246,63 @@ class DetectorService:
             import torch
             from ultralytics import YOLO
 
+            settings = get_settings()
+
+            # ultralytics ships its own built-in MLflow integration, auto-
+            # enabled the moment `mlflow` is importable (which it now always
+            # is - mlflow-skinny is a hard requirement, see requirements.txt).
+            # It reads MLFLOW_TRACKING_URI from os.environ directly, which
+            # this app's Settings does NOT populate (pydantic-settings parses
+            # .env into the Settings object only, never exports it to the
+            # process environment) - so left alone, ultralytics' callback
+            # can't see the same URI mlflow_tracking.start() below configures,
+            # falls back to a local file-store path, and calls
+            # mlflow.set_tracking_uri() with that fallback mid-training.
+            # That's global module-level state: it silently redirects every
+            # subsequent log_metrics call - ours included - away from the
+            # real server.
+            #
+            # Fixed by exporting the same URI into os.environ so ultralytics'
+            # callback resolves to the identical server we already configured
+            # - not by touching ultralytics' own SETTINGS (a persisted,
+            # per-*user* JSON file at ~/.config/Ultralytics/settings.json,
+            # shared with any other ultralytics usage on this host outside
+            # this app entirely; flipping that off here would be exactly the
+            # kind of unrelated-system side effect this project avoids).
+            # ultralytics then finds our run already active via
+            # mlflow.active_run() and logs into the same one rather than
+            # starting its own.
+            if mlflow_tracking.is_configured(settings):
+                os.environ["MLFLOW_TRACKING_URI"] = settings.mlflow_tracking_uri
+                os.environ["MLFLOW_EXPERIMENT_NAME"] = settings.mlflow_experiment_name
+
             device = 0 if torch.cuda.is_available() else "cpu"
             model = YOLO(MODEL_WEIGHTS)
+
+            # M5 (Scope A only - see mlflow_tracking's module docstring):
+            # unconditionally attempted, never blocks training if MLflow is
+            # unreachable - see mlflow_tracking.start's own contract.
+            tracked = mlflow_tracking.start(
+                settings,
+                run_name=f"detector-{job_id}",
+                tags={
+                    "dataset_key": self._ds.dataset_key,
+                    "job_id": job_id,
+                    "mode": "full_retrain",
+                    "trigger": trigger,
+                },
+            )
+            if tracked:
+                mlflow_tracking.log_params(
+                    {
+                        "base_weights": MODEL_WEIGHTS,
+                        "epochs": EPOCHS,
+                        "patience": 20,
+                        "device": device,
+                        "num_images": num_images,
+                        "num_classes": len(classes),
+                    }
+                )
 
             def on_epoch_end(trainer) -> None:
                 try:
@@ -246,7 +310,21 @@ class DetectorService:
                 except Exception:
                     logger.exception("Failed to record training epoch progress")
 
+            def on_fit_epoch_end(trainer) -> None:
+                if tracked and trainer.metrics:
+                    # ultralytics' own metric keys carry parentheses, e.g.
+                    # "metrics/precision(B)" - MLflow's REST API rejects
+                    # those outright ("Names may only contain alphanumerics,
+                    # underscores, dashes, periods, spaces and slashes"),
+                    # failing every single log_metrics call otherwise (caught
+                    # live: 100/100 epochs errored before this was added,
+                    # silently absorbed by mlflow_tracking's best-effort
+                    # contract so training itself never noticed).
+                    sanitized = {k.replace("(", "").replace(")", ""): v for k, v in trainer.metrics.items()}
+                    mlflow_tracking.log_metrics(sanitized, step=int(trainer.epoch))
+
             model.add_callback("on_train_epoch_end", on_epoch_end)
+            model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
             model.train(
                 data=str(data_yaml),
                 epochs=EPOCHS,
@@ -260,7 +338,7 @@ class DetectorService:
             )
 
             self._update(job_id, stage="saving")
-            best_weights = staging_dir / "run" / "weights" / "best.pt"
+            best_weights = run_dir / "weights" / "best.pt"
             if not best_weights.exists():
                 raise RuntimeError("Training finished but no best.pt weights file was produced")
 
@@ -288,10 +366,22 @@ class DetectorService:
                 self._loaded_model = None
                 self._loaded_model_path = None
 
+            if tracked:
+                # Logged before the finally-block rmtree below deletes
+                # run_dir entirely - results.csv, PR curve, confusion
+                # matrix, args.yaml all used to be discarded unread here.
+                mlflow_tracking.log_artifacts(run_dir)
+                mlflow_tracking.set_tags({"detector_version": str(new_version)})
+                mlflow_tracking.end(status="FINISHED")
+                tracked = False
+
             self._update(job_id, status="completed", stage="done", current_epoch=EPOCHS)
         except Exception as exc:
             logger.exception("Detector training failed")
             self._update(job_id, status="failed", error=str(exc))
+            if tracked:
+                mlflow_tracking.set_tags({"error": str(exc)})
+                mlflow_tracking.end(status="FAILED")
         finally:
             shutil.rmtree(staging_dir, ignore_errors=True)
 

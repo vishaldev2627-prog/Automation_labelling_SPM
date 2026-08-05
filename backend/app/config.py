@@ -110,6 +110,22 @@ class Settings(BaseSettings):
     golden_s3_bucket: str = "vb-golden-eval-set"
     golden_s3_prefix: str = "golden"
 
+    # MLflow tracking (M5, Scope A only - the in-tool SAM2/detector
+    # pre-labeler helper, never the pipeline team's own 8 production
+    # families; Q-C: we stage data for them, we never write into their
+    # MLflow). Empty by default so a deployment that never sets this up
+    # doesn't need the mlflow-skinny dependency to be reachable - training
+    # still runs, it just isn't tracked. See detector_service._run_training.
+    mlflow_tracking_uri: str = ""
+    mlflow_experiment_name: str = "annot-detector-training"
+    # Auto-kick a Scope A training run whenever a *genuinely new* snapshot
+    # finalizes (export_service._finalize_snapshot) - a re-export that
+    # resolves to an already-existing snapshot (M2's content-addressing)
+    # does not retrigger, since nothing about the data actually changed.
+    # Runs in the background; never blocks or fails the export response if
+    # training can't start (see the try/except around it).
+    auto_train_on_handoff: bool = True
+
     # Logging
     log_level: str = "INFO"
     log_file: str = "../logs/backend.log"

@@ -18,6 +18,10 @@ services:
       - PGDATA=/var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # Runs once, only against a brand-new empty data directory - see
+      # db-init/001_create_mlflow_db.sql for what it does and the one-line
+      # manual step needed against an already-initialized volume.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       # No -U/-d flags: pg_isready just checks that the postmaster is
       # accepting connections, which doesn't require a valid role - keeps
@@ -57,6 +61,63 @@ services:
       timeout: 5s
       retries: 10
 
+  mlflow:
+    build:
+      context: ./mlflow
+    container_name: railway-annotator-mlflow
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # POSTGRES_HOST/PORT/DB are not secret, hardcoded like the backend
+      # service does for the same values. POSTGRES_USER/PASSWORD are
+      # deliberately absent here - see the `db`/`minio` services' own
+      # comments on why: they come from the env_file for local dev and must
+      # be set directly on this service's own Coolify Environment Variables
+      # tab in prod, matching the `db` service's values exactly.
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - MLFLOW_BACKEND_DB=mlflow_tracking
+      # MLflow's artifact store: same MinIO instance as the snapshot/golden
+      # buckets, its own bucket. MLFLOW_S3_ENDPOINT_URL is boto3/MLflow's own
+      # expected name for the endpoint, not secret. AWS_ACCESS_KEY_ID/SECRET
+      # (also boto3's fixed names, not renamable) are deliberately absent
+      # here for the same reason as POSTGRES_PASSWORD above - they must be
+      # set to the *same values* as MINIO_ROOT_USER/PASSWORD, via the
+      # env_file locally or Coolify's UI in prod.
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - MLFLOW_ARTIFACT_ROOT=s3://mlflow-artifacts/
+    ports:
+      - "5050:5000"
+    # The backend-store URI is built here, inside the container at start,
+    # from container-runtime env vars - not with docker-compose's own
+    # ${VAR} file-level substitution. This file's other services all avoid
+    # ${POSTGRES_USER}/${PASSWORD}-style interpolation for exactly this
+    # reason (see the `db`/`backend` services' comments): Coolify injects
+    # its UI-configured vars into the running container but not into
+    # compose's own substitution pass, so ${POSTGRES_USER} here would
+    # silently resolve to empty in prod even though it works locally.
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        mlflow server
+        --backend-store-uri postgresql://$$POSTGRES_USER:$$POSTGRES_PASSWORD@$$POSTGRES_HOST:$$POSTGRES_PORT/$$MLFLOW_BACKEND_DB
+        --default-artifact-root $$MLFLOW_ARTIFACT_ROOT
+        --serve-artifacts
+        --host 0.0.0.0
+        --port 5000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: ./backend
@@ -70,6 +131,14 @@ services:
       # app/services/object_store.py) - but waiting avoids a spurious failure on
       # the first publish right after a cold `compose up`.
       minio:
+        condition: service_healthy
+      # Not a hard dependency for the app to function, same reasoning as
+      # minio above: a training run's MLflow logging is wrapped to degrade
+      # gracefully (report, don't fail the run) if the tracking server is
+      # unreachable - see detector_service._run_training. Waiting just
+      # avoids a spurious failure on the very first run right after a cold
+      # `compose up`.
+      mlflow:
         condition: service_healthy
     env_file:
       - path: .env
@@ -108,6 +177,12 @@ services:
       - S3_ENDPOINT_URL=http://minio:9000
       - S3_BUCKET=vb-dataset-snapshots
       - S3_PREFIX=snapshots
+      # Scope A tracking (M5) - the in-tool SAM2/detector pre-labeler helper
+      # only, never the pipeline team's own 8 production families (Q-C: we
+      # stage data for them, we don't write into their MLflow). Not secret,
+      # hardcoded like the paths above - it's the mlflow service's compose
+      # DNS name.
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
     # GPU passthrough via nvidia-container-toolkit; the backend image now installs
     # a CUDA-enabled (cu128) torch build with Blackwell (sm_121) kernels for this
     # host's GB10 GPU. sam_device=auto picks it up automatically when available.
