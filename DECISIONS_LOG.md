@@ -563,6 +563,43 @@ for all 30 classes - with `golden_eval_images: 200` confirming the full golden s
 near-zero scores are the expected, honest result of a model trained on only 5 images, not a bug in the
 eval path.
 
+**M7 — model registry + promotion recommendation, recommendation-only by design.** Discussed with the
+product owner before building rather than assumed: the build plan's own risk note for this milestone
+is blunt ("this is where a wrong design silently promotes a bad model... no auto-approve for any
+class in the first iteration"), so the scope agreed on deliberately stops short of the full milestone.
+
+**What "recommendation-only" means concretely:** `model_registry_service.py` registers each
+successfully-trained candidate as a new version of `AnnotDetector-<slug>` in MLflow's own Model
+Registry, and tags it with a computed verdict - `eligible_no_baseline` (nothing in Production yet),
+`eligible` (matches or beats Production on every class the golden set covers), or `regressed`
+(with the exact class ids that scored worse). **Nothing here transitions a stage.** Promoting a
+version to `Production` is a human action taken directly in MLflow's own UI, with a real account -
+this tool's identity system is a name, not a login, and was explicitly ruled out as a stand-in for an
+approval record on a decision this consequential.
+
+**Also deliberately out of scope for this pass:** `detector_service.detect()` still reads the active
+model from `registry.json` exactly as before - a stage move in MLflow's UI has no effect on what
+annotators are served yet. Making promotion actually swap the live model, and building a rollback
+path, were named as a separate, later decision once the recommendation logic itself has been trusted
+for a while - not bundled into this pass.
+
+Comparison basis, also a deliberate simplification: rather than downloading and re-running the current
+Production model's weights against the golden set, the candidate's freshly-computed per-class scores
+are compared against the *stored* `golden/classN_mAP50` metrics from the run that originally produced
+the current Production version. Simpler, no model reload needed - a curator who suspects those are
+stale (the golden set can grow over time) can always re-run eval by hand; this is advice, not a gate.
+A class the candidate covers with no stored baseline (e.g. added since Production was last evaluated)
+cannot count as regressed - there's nothing to regress against.
+
+Verified live end-to-end, not just unit-tested: two real training runs against the real golden set.
+The first registered as version 1, tagged `eligible_no_baseline` (correct - no Production existed),
+then manually promoted to `Production` (simulating the human step). The second registered as version
+2 and was correctly tagged `regressed` with the exact class ids that scored worse
+(`0,1,8,11,12,13,17,18`) and `compared_against_version: 1` - version 2's own stage stayed `None`,
+confirming nothing auto-promotes. Natural variance training the same 5 tiny images twice producing
+some classes better and some worse is expected here - exactly the scenario this gate exists to
+surface, not paper over with an aggregate number.
+
 Two real bugs found and fixed only because this was run for real rather than left as "should work":
 
 1. **ultralytics ships its own built-in MLflow integration**, auto-enabled the instant `mlflow` is

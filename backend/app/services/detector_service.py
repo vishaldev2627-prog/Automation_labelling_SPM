@@ -32,7 +32,7 @@ from typing import Optional
 from app.config import get_settings
 from app.models.schemas import BoundingBox, DetectorInfo, DetectorTrainJobStatus, ObjectStatus
 from app.db import SessionLocal
-from app.services import golden_eval_service, golden_repo, gpu_scheduler, mlflow_tracking
+from app.services import golden_eval_service, golden_repo, gpu_scheduler, mlflow_tracking, model_registry_service
 from app.services.dataset_service import DatasetNotFoundError, DatasetService
 from app.utils.file_utils import atomic_write_json, new_id, read_json
 
@@ -401,6 +401,7 @@ class DetectorService:
             # scored against the set nothing trains on. Best-effort and
             # non-fatal: a golden-eval failure must never turn an otherwise
             # successful training run into a reported failure.
+            eval_result = None
             if settings.auto_eval_on_golden_set:
                 try:
                     db = SessionLocal()
@@ -437,6 +438,19 @@ class DetectorService:
                 # matrix, args.yaml all used to be discarded unread here.
                 mlflow_tracking.log_artifacts(run_dir)
                 mlflow_tracking.set_tags({"detector_version": str(new_version)})
+
+                # M7 (recommendation-only - see model_registry_service's own
+                # module docstring for why nothing here auto-promotes, or
+                # changes what registry.json-backed detect() actually
+                # serves). Only meaningful once a golden-set eval exists to
+                # base a recommendation on.
+                if eval_result:
+                    run_id = mlflow_tracking.current_run_id()
+                    if run_id:
+                        model_registry_service.register_and_recommend(
+                            _slug_for(self._ds.dataset_key), run_id, eval_result["per_class"]
+                        )
+
                 mlflow_tracking.end(status="FINISHED")
                 tracked = False
 

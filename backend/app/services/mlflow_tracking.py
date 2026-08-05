@@ -86,6 +86,22 @@ def set_tags(tags: dict) -> None:
     _safe(lambda: __import__("mlflow").set_tags(tags))
 
 
+def current_run_id() -> Optional[str]:
+    """The active run's id, if one is active - None on any failure
+    (including "no run active"), same best-effort contract as everything
+    else here. Used by model_registry_service (M7) to register this run's
+    model under its own run_id, since MLflow's registry ties a model
+    version to the run that produced it."""
+    try:
+        import mlflow
+
+        run = mlflow.active_run()
+        return run.info.run_id if run else None
+    except Exception:
+        logger.exception("Could not read the active MLflow run id")
+        return None
+
+
 def end(status: str) -> None:
     """status: one of MLflow's own run-status strings - "FINISHED" or
     "FAILED". Always called from detector_service's own except/success
