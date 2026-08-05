@@ -1,16 +1,40 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
+import { DatasetAPI } from "../../api/client";
 import { useDatasetStore } from "../../store/datasetStore";
 import { useSettingsStore } from "../../store/settingsStore";
+import type { ClassMapVersionInfo } from "../../types";
 
 export default function ClassPanel() {
   const classes = useDatasetStore((s) => s.classes);
   const setClassColor = useDatasetStore((s) => s.setClassColor);
   const setClassSafetyCritical = useDatasetStore((s) => s.setClassSafetyCritical);
+  const setClassFineStructure = useDatasetStore((s) => s.setClassFineStructure);
   const addClass = useDatasetStore((s) => s.addClass);
   const { hiddenClassIds, toggleClassVisibility, activeClassId, setActiveClassId } = useSettingsStore();
   const [newClassName, setNewClassName] = useState("");
   const [adding, setAdding] = useState(false);
+  const [classMap, setClassMap] = useState<ClassMapVersionInfo | null>(null);
+
+  // Keyed on the class list rather than fetched once: adding a class mints a new
+  // version, and switching dataset view changes both the classes and the map, so
+  // this stays correct without threading the map through the store's five
+  // load/switch/reload paths.
+  useEffect(() => {
+    let cancelled = false;
+    DatasetAPI.classMap()
+      .then((m) => {
+        if (!cancelled) setClassMap(m);
+      })
+      .catch(() => {
+        // No dataset loaded, or no version recorded yet (the backend logs why).
+        // The badge simply doesn't render - it's provenance, not a control.
+        if (!cancelled) setClassMap(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [classes]);
 
   const handleAddClass = async () => {
     const name = newClassName.trim();
@@ -30,9 +54,26 @@ export default function ClassPanel() {
 
   return (
     <div className="max-h-64 overflow-y-auto border-t border-surface-700 p-2">
-      <h3 className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-        Classes ({classes.length})
-      </h3>
+      <div className="mb-1 flex items-baseline justify-between px-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+          Classes ({classes.length})
+        </h3>
+        {/* The class map is versioned and immutable — adding or renaming a class
+            mints a new version rather than editing in place. Surfaced here so
+            an annotator can tell at a glance which map they're labelling
+            against, since a mismatch between the map a snapshot pins and the
+            map a model trained on is a corrupted run that looks normal. */}
+        {classMap && (
+          <span
+            className="cursor-help text-[10px] font-medium text-gray-500"
+            title={`Class-map version ${classMap.version}\n${classMap.content_hash}\nExcluded (never labelled or shipped): ${
+              classMap.exclude_classes.join(", ") || "none"
+            }`}
+          >
+            map v{classMap.version}
+          </span>
+        )}
+      </div>
       <p className="mb-2 px-2 text-[11px] text-gray-500">
         Click a class, then drag a box on the image (tool: ▭) to label something the detector missed.
       </p>
@@ -76,6 +117,22 @@ export default function ClassPanel() {
               }
             >
               ⚠
+            </button>
+            <button
+              // Same conditional-opacity trick as ⚠ above: multi-color emoji
+              // glyphs ignore CSS `color`.
+              className={c.fine_structure ? "opacity-100" : "opacity-20 hover:opacity-60"}
+              onClick={(e) => {
+                e.stopPropagation();
+                setClassFineStructure(c.class_id, !c.fine_structure);
+              }}
+              title={
+                c.fine_structure
+                  ? "Fine structure: every mask contour kept, no polygon simplification, and a binary mask raster exported. For thin/branching defects scored on length (crack, corrosion, shelling). Click to unmark."
+                  : "Not marked fine structure. Click to mark — use for thin/branching defects where simplification and dropped contours would cost measured length."
+              }
+            >
+              🧵
             </button>
             <button
               className="text-gray-500 hover:text-gray-200"

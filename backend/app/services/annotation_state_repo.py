@@ -86,6 +86,26 @@ def save_state(
     db.commit()
 
 
+def get_updated_by_ids(db: Session, dataset_key: str, image_ids: list[str]) -> set[int]:
+    """Distinct annotators who last saved any of these images.
+
+    Feeds the snapshot manifest's `provenance.annotator_ids`, so a dataset can be
+    traced to the people who produced it - one of the lineage tags the build plan
+    Phase 5 requires on every snapshot. Reads the column rather than the JSONB
+    payload, which does not carry it.
+    """
+    if not image_ids:
+        return set()
+    rows = db.execute(
+        select(AnnotationState.updated_by_id).where(
+            AnnotationState.dataset_view == dataset_key,
+            AnnotationState.image_id.in_(image_ids),
+            AnnotationState.updated_by_id.isnot(None),
+        )
+    ).all()
+    return {row[0] for row in rows}
+
+
 def get_colors(db: Session, dataset_key: str) -> dict[str, str]:
     rows = db.execute(
         select(DatasetClass.class_id, DatasetClass.color).where(DatasetClass.dataset_view == dataset_key)
@@ -100,52 +120,96 @@ def get_safety_flags(db: Session, dataset_key: str) -> dict[str, bool]:
     return {str(class_id): flag for class_id, flag in rows}
 
 
+def get_fine_structure_flags(db: Session, dataset_key: str) -> dict[str, bool]:
+    rows = db.execute(
+        select(DatasetClass.class_id, DatasetClass.fine_structure).where(
+            DatasetClass.dataset_view == dataset_key
+        )
+    ).all()
+    return {str(class_id): flag for class_id, flag in rows}
+
+
 def set_class_safety_critical(db: Session, dataset_key: str, class_id: int, safety_critical: bool) -> bool:
     """Returns False if no row exists yet for this class (dataset never
     loaded far enough to sync it) - caller should treat that as not found,
     not silently succeed."""
+    return _set_class_flag(db, dataset_key, class_id, safety_critical=safety_critical)
+
+
+def set_class_fine_structure(db: Session, dataset_key: str, class_id: int, fine_structure: bool) -> bool:
+    return _set_class_flag(db, dataset_key, class_id, fine_structure=fine_structure)
+
+
+def _set_class_flag(db: Session, dataset_key: str, class_id: int, **values: bool) -> bool:
     result = db.execute(
         update(DatasetClass)
         .where(DatasetClass.dataset_view == dataset_key, DatasetClass.class_id == class_id)
-        .values(safety_critical=safety_critical)
+        .values(**values)
     )
     db.commit()
     return result.rowcount > 0
 
 
 def save_colors_bulk(
-    db: Session, dataset_key: str, classes: list[str], colors: dict[str, str], default_safety: dict[str, bool]
+    db: Session,
+    dataset_key: str,
+    classes: list[str],
+    colors: dict[str, str],
+    default_safety: dict[str, bool],
+    default_fine_structure: dict[str, bool] | None = None,
 ) -> None:
     """Upsert one row per (dataset_key, class_id) - mirrors the old
     `_save_meta()` full-rewrite, just as N upserts instead of one file write.
     N is the class count (tens, not thousands), so this is cheap.
 
-    `default_safety` only takes effect for a class_id that doesn't already
-    have a row (see _upsert_class) - it never overwrites a curator's
-    existing safety_critical choice on an already-known class.
+    `default_safety` / `default_fine_structure` only take effect for a
+    class_id that doesn't already have a row (see _upsert_class) - they never
+    overwrite a curator's existing choice on an already-known class.
     """
+    default_fine_structure = default_fine_structure or {}
     for class_id, name in enumerate(classes):
         color = colors.get(str(class_id))
         if color is None:
             continue
-        _upsert_class(db, dataset_key, class_id, name, color, default_safety.get(str(class_id), False))
+        _upsert_class(
+            db,
+            dataset_key,
+            class_id,
+            name,
+            color,
+            default_safety.get(str(class_id), False),
+            default_fine_structure.get(str(class_id), False),
+        )
     db.commit()
 
 
 def set_class_color(db: Session, dataset_key: str, class_id: int, name: str, color: str) -> None:
-    _upsert_class(db, dataset_key, class_id, name, color, safety_critical_if_new=False)
+    _upsert_class(
+        db, dataset_key, class_id, name, color, safety_critical_if_new=False, fine_structure_if_new=False
+    )
     db.commit()
 
 
 def _upsert_class(
-    db: Session, dataset_key: str, class_id: int, name: str, color: str, safety_critical_if_new: bool
+    db: Session,
+    dataset_key: str,
+    class_id: int,
+    name: str,
+    color: str,
+    safety_critical_if_new: bool,
+    fine_structure_if_new: bool,
 ) -> None:
     stmt = insert(DatasetClass).values(
-        dataset_view=dataset_key, class_id=class_id, name=name, color=color, safety_critical=safety_critical_if_new
+        dataset_view=dataset_key,
+        class_id=class_id,
+        name=name,
+        color=color,
+        safety_critical=safety_critical_if_new,
+        fine_structure=fine_structure_if_new,
     )
-    # safety_critical deliberately excluded from set_= : ON CONFLICT (an
-    # existing class) never touches it, only a brand-new row gets
-    # safety_critical_if_new - preserves whatever a curator already set.
+    # safety_critical / fine_structure deliberately excluded from set_= :
+    # ON CONFLICT (an existing class) never touches them, only a brand-new row
+    # gets the *_if_new values - preserves whatever a curator already set.
     stmt = stmt.on_conflict_do_update(
         constraint="uq_dataset_classes_view_class",
         set_={"name": stmt.excluded.name, "color": stmt.excluded.color},

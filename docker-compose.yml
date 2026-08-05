@@ -65,6 +65,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # Not a hard dependency for the app to function - publishing a snapshot is
+      # opt-in and a failure is reported rather than fatal (see
+      # app/services/object_store.py) - but waiting avoids a spurious failure on
+      # the first publish right after a cold `compose up`.
+      minio:
+        condition: service_healthy
     env_file:
       - path: .env
         required: false
@@ -93,6 +99,15 @@ services:
       # values) in this service's Coolify Environment Variables tab in prod.
       - POSTGRES_HOST=db
       - POSTGRES_PORT=5432
+      # Dataset-snapshot staging store (M2). Endpoint/bucket/prefix are not
+      # secret, so they're hardcoded here like the paths above; the endpoint is
+      # the minio service's compose DNS name. S3_ACCESS_KEY/S3_SECRET_KEY are
+      # deliberately NOT here - they come from the env_file for local dev and
+      # must be set on this service's own Coolify Environment Variables tab in
+      # prod, matching the minio service's MINIO_ROOT_USER/PASSWORD.
+      - S3_ENDPOINT_URL=http://minio:9000
+      - S3_BUCKET=vb-dataset-snapshots
+      - S3_PREFIX=snapshots
     # GPU passthrough via nvidia-container-toolkit; the backend image now installs
     # a CUDA-enabled (cu128) torch build with Blackwell (sm_121) kernels for this
     # host's GB10 GPU. sam_device=auto picks it up automatically when available.

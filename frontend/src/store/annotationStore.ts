@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { ImagesAPI, MaskAPI } from "../api/client";
-import type { AnnotationObject, BoundingBox, ImageAnnotations, Point } from "../types";
+import type { AnnotationObject, BoundingBox, CoachType, ImageAnnotations, Point } from "../types";
 
 const MAX_HISTORY = 50;
 const AUTOSAVE_DEBOUNCE_MS = 800;
@@ -11,6 +11,8 @@ interface AnnotationState {
   imageHeight: number;
   objects: AnnotationObject[];
   completed: boolean;
+  noObjectsConfirmed: boolean;
+  coachType: CoachType;
   selectedObjectId: string | null;
   loading: boolean;
   saving: boolean;
@@ -44,6 +46,13 @@ interface AnnotationState {
   redo: () => void;
 
   saveNow: (markCompleted?: boolean) => Promise<void>;
+  /** Assert (or retract) "a human looked and this frame is empty". Confirming
+   * also completes the image, since that is what makes it an exportable
+   * negative sample. */
+  setNoObjectsConfirmed: (confirmed: boolean) => Promise<void>;
+  /** Set the coach type on the currently open image only. Bulk assignment goes
+   * through ImagesAPI.setCoachType, not here. */
+  setCoachType: (coachType: CoachType) => Promise<void>;
   scheduleAutosave: () => void;
 }
 
@@ -55,6 +64,8 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
   imageHeight: 0,
   objects: [],
   completed: false,
+  noObjectsConfirmed: false,
+  coachType: "unknown",
   selectedObjectId: null,
   loading: false,
   saving: false,
@@ -84,6 +95,8 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
         imageHeight: data.height,
         objects: data.objects,
         completed: data.completed,
+        noObjectsConfirmed: data.no_objects_confirmed,
+        coachType: data.coach_type,
         loading: false,
         needsGeneration: data.objects.some((o) => o.polygon.length === 0),
       });
@@ -115,7 +128,8 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
     get().updateObject(objectId, (o) => ({
       ...o,
       polygon: result.polygon,
-      confidence: result.confidence,
+      extra_polygons: result.extra_polygons,
+      mask_confidence: result.confidence,
       all_mask_scores: result.all_scores,
       selected_mask_index: result.selected_mask_index,
       status: "auto_generated",
@@ -137,7 +151,8 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
     get().updateObject(objectId, (o) => ({
       ...o,
       polygon: result.polygon,
-      confidence: result.confidence,
+      extra_polygons: result.extra_polygons,
+      mask_confidence: result.confidence,
       all_mask_scores: result.all_scores,
       selected_mask_index: result.selected_mask_index,
       status: "edited",
@@ -152,9 +167,16 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
       id: result.object_id,
       class_id: classId,
       class_name: className,
+      // Unassessed, not "ok" — drawing a box says what the component is, not
+      // what state it's in (see Condition).
+      condition: null,
       bbox,
       polygon: result.polygon,
-      confidence: result.confidence,
+      extra_polygons: result.extra_polygons,
+      // A hand-drawn box has no detector behind it, so there is no class
+      // confidence to record - null, not 0 (see AnnotationObject).
+      detector_confidence: null,
+      mask_confidence: result.confidence,
       all_mask_scores: result.all_scores,
       selected_mask_index: result.selected_mask_index,
       status: "auto_generated",
@@ -171,7 +193,8 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
     get().updateObject(objectId, (o) => ({
       ...o,
       polygon: result.polygon,
-      confidence: result.confidence,
+      extra_polygons: result.extra_polygons,
+      mask_confidence: result.confidence,
       selected_mask_index: result.selected_mask_index,
     }));
   },
@@ -244,8 +267,55 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
     if (!imageId) return;
     set({ saving: true, saveError: null });
     try {
+      // no_objects_confirmed deliberately not sent here - a routine save or
+      // autosave must not clear a confirmation a human made.
       const result = await ImagesAPI.saveAnnotations(imageId, objects, markCompleted ?? completed);
-      set({ saving: false, completed: result.completed });
+      set({
+        saving: false,
+        completed: result.completed,
+        noObjectsConfirmed: result.no_objects_confirmed,
+        coachType: result.coach_type,
+      });
+    } catch (err: any) {
+      set({ saving: false, saveError: err?.message ?? "Save failed" });
+      throw err;
+    }
+  },
+
+  setNoObjectsConfirmed: async (confirmed: boolean) => {
+    const { imageId, objects, completed } = get();
+    if (!imageId) return;
+    set({ saving: true, saveError: null });
+    try {
+      const result = await ImagesAPI.saveAnnotations(
+        imageId,
+        objects,
+        // Confirming empty completes the image - an unconfirmed-and-incomplete
+        // empty frame is just unannotated. Retracting leaves completion alone
+        // rather than un-completing, matching the backend's existing rule that
+        // `completed` never goes back to false on a save.
+        confirmed ? true : completed,
+        confirmed,
+      );
+      set({
+        saving: false,
+        completed: result.completed,
+        noObjectsConfirmed: result.no_objects_confirmed,
+        coachType: result.coach_type,
+      });
+    } catch (err: any) {
+      set({ saving: false, saveError: err?.message ?? "Save failed" });
+      throw err;
+    }
+  },
+
+  setCoachType: async (coachType: CoachType) => {
+    const { imageId, objects, completed } = get();
+    if (!imageId) return;
+    set({ saving: true, saveError: null });
+    try {
+      const result = await ImagesAPI.saveAnnotations(imageId, objects, completed, undefined, coachType);
+      set({ saving: false, coachType: result.coach_type, completed: result.completed });
     } catch (err: any) {
       set({ saving: false, saveError: err?.message ?? "Save failed" });
       throw err;

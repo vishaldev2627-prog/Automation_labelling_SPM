@@ -103,6 +103,23 @@ class PropagationService:
 
         new_objects: list[AnnotationObject] = []
         for src in seed_objects:
+            # detector_confidence is deliberately NOT carried over from the
+            # source object: no detector ran on *this* image, so there is no
+            # class confidence about this frame to record (see
+            # AnnotationObject on why that is None rather than 0.0). The
+            # practical effect is that a propagated frame is never
+            # auto-accept eligible - stacking propagation and auto-accept
+            # would mean two automations in a row with no human in between,
+            # on the exact path the build plan calls out as its [HIGH]
+            # "propagation-driven error compounding" risk. Mask confidence
+            # is still computed below, since SAM2 genuinely does run here.
+            #
+            # `condition` is likewise not carried over, and left unassessed. The
+            # class of a component is a property of the component, so copying it
+            # onto a near-duplicate frame is reasonable; its *condition* is a
+            # defect judgement about this frame, and propagating a defect state
+            # onto a frame no human has looked at is precisely the [HIGH]
+            # "propagation-driven error compounding" risk in the build plan.
             new_obj = AnnotationObject(
                 id=new_id(),
                 class_id=src.class_id,

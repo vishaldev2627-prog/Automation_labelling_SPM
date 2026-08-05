@@ -5,10 +5,27 @@ import { useDatasetStore } from "../../store/datasetStore";
 import type { TriageQueue } from "../../types";
 
 type SimpleItem = { image_id: string; file_name: string };
-type TabKey = "low_confidence" | "novel" | "routine" | "pending_review" | "audit_sample" | "auto_accept";
+type TabKey =
+  | "low_confidence"
+  | "no_confidence_signal"
+  | "novel"
+  | "routine"
+  | "pending_review"
+  | "audit_sample"
+  | "auto_accept";
 
 const TABS: { key: TabKey; label: string; title: string }[] = [
-  { key: "low_confidence", label: "Low conf.", title: "Auto-detected objects with low confidence (Phase 2 tier 2)" },
+  {
+    key: "low_confidence",
+    label: "Low conf.",
+    title: "Low average detector confidence on the class (Phase 2 tier 2)",
+  },
+  {
+    key: "no_confidence_signal",
+    label: "No signal",
+    title:
+      "Objects with no detector confidence at all - boxes read from a YOLO label file, or annotated before detector and mask confidence were separated. Unranked rather than silently absent.",
+  },
   { key: "novel", label: "Novel", title: "Frames far from everything else in the similarity index (Phase 2 tier 3)" },
   { key: "routine", label: "Routine", title: "A stable random sample, to catch silent drift (Phase 2 tier 4)" },
   { key: "pending_review", label: "Pending", title: "Completed images that still need a second-reviewer sign-off" },
@@ -35,6 +52,7 @@ export default function QueuePanel() {
   const [tab, setTab] = useState<TabKey>("low_confidence");
   const [items, setItems] = useState<Record<TabKey, SimpleItem[]>>({
     low_confidence: [],
+    no_confidence_signal: [],
     novel: [],
     routine: [],
     pending_review: [],
@@ -56,6 +74,7 @@ export default function QueuePanel() {
       const q = triage as TriageQueue;
       setItems({
         low_confidence: q.low_confidence,
+        no_confidence_signal: q.no_confidence_signal,
         novel: q.novel,
         routine: q.routine,
         pending_review: pending,

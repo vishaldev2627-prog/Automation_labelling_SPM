@@ -94,6 +94,26 @@ export default function PolygonLayer({
 
   return (
     <Group>
+      {/* Extra disjoint pieces of the same object — only ever present for
+          fine_structure classes, where a branching or segmented crack is one
+          object made of several contours. Drawn so an annotator can actually
+          see and check them; not vertex-editable, since editing which piece is
+          "the" polygon has no meaning. Dashed to distinguish them from the
+          primary piece, which is the one editing acts on. */}
+      {obj.extra_polygons.map((piece, i) =>
+        piece.length >= 3 ? (
+          <Line
+            key={`extra-${i}`}
+            points={piece.flatMap((p) => [p.x * imageWidth, p.y * imageHeight])}
+            closed
+            stroke={color}
+            strokeWidth={isSelected ? 2 : 1.25}
+            dash={[4, 3]}
+            fillEnabled={false}
+            listening={false}
+          />
+        ) : null,
+      )}
       <Line
         points={pixelPoints}
         closed

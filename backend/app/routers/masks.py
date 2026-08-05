@@ -51,7 +51,8 @@ def generate_mask(request: GenerateMaskRequest) -> GenerateMaskResponse:
         return GenerateMaskResponse(
             object_id=obj.id,
             polygon=obj.polygon,
-            confidence=obj.confidence,
+            extra_polygons=obj.extra_polygons,
+            confidence=obj.mask_confidence,
             all_scores=obj.all_mask_scores,
             selected_mask_index=obj.selected_mask_index,
         )
@@ -91,7 +92,8 @@ def select_mask(image_id: str, object_id: str, payload: dict) -> GenerateMaskRes
         return GenerateMaskResponse(
             object_id=obj.id,
             polygon=obj.polygon,
-            confidence=obj.confidence,
+            extra_polygons=obj.extra_polygons,
+            confidence=obj.mask_confidence,
             all_scores=obj.all_mask_scores,
             selected_mask_index=obj.selected_mask_index,
         )

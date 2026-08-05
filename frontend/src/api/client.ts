@@ -3,6 +3,8 @@ import type {
   AnnotationObject,
   BatchJobStatus,
   ClassInfo,
+  ClassMapVersionInfo,
+  CoachType,
   DatasetInfo,
   DatasetView,
   DetectorInfo,
@@ -79,7 +81,16 @@ export const DatasetAPI = {
     api.put(`/dataset/classes/${classId}/color`, { color }).then((r) => r.data),
   setClassSafetyCritical: (classId: number, safetyCritical: boolean) =>
     api.put(`/dataset/classes/${classId}/safety-critical`, { safety_critical: safetyCritical }).then((r) => r.data),
+  setClassFineStructure: (classId: number, fineStructure: boolean) =>
+    api
+      .put(`/dataset/classes/${classId}/fine-structure`, { fine_structure: fineStructure })
+      .then((r) => r.data),
   addClass: (name: string) => api.post<ClassInfo>("/dataset/classes", { name }).then((r) => r.data),
+  /** The immutable class-map version this view currently resolves to — what a
+   * dataset snapshot pins so "class 7" stays answerable later. */
+  classMap: () => api.get<ClassMapVersionInfo>("/dataset/class-map").then((r) => r.data),
+  classMapVersions: () =>
+    api.get<ClassMapVersionInfo[]>("/dataset/class-map/versions").then((r) => r.data),
   views: () => api.get<DatasetView[]>("/dataset/views").then((r) => r.data),
   switchView: (view: string) => api.post<DatasetInfo>("/dataset/switch", { view }).then((r) => r.data),
 };
@@ -95,13 +106,34 @@ export const ImagesAPI = {
   fileUrl: (imageId: string) => `/api/images/${imageId}/file`,
   getAnnotations: (imageId: string) =>
     api.get<ImageAnnotations>(`/images/${imageId}/annotations`).then((r) => r.data),
-  saveAnnotations: (imageId: string, objects: AnnotationObject[], markCompleted: boolean) =>
+  saveAnnotations: (
+    imageId: string,
+    objects: AnnotationObject[],
+    markCompleted: boolean,
+    // Omitted on a normal save/autosave so the backend leaves whatever is
+    // stored alone; only sent when a human is actually asserting or
+    // retracting "this frame is empty".
+    noObjectsConfirmed?: boolean,
+    coachType?: CoachType,
+  ) =>
     api
       .post<ImageAnnotations>("/images/annotations/save", {
         image_id: imageId,
         objects,
         mark_completed: markCompleted,
+        ...(noObjectsConfirmed === undefined ? {} : { no_objects_confirmed: noObjectsConfirmed }),
+        ...(coachType === undefined ? {} : { coach_type: coachType }),
       })
+      .then((r) => r.data),
+  /** Bulk-assign a coach type. With no imageIds, applies only to images whose
+   * type is still "unknown" — a bulk action never overwrites a per-image
+   * correction. Only images with saved annotation state are affected. */
+  setCoachType: (coachType: CoachType, imageIds: string[] = []) =>
+    api
+      .post<{ coach_type: CoachType; updated: number; skipped_no_saved_state: number }>(
+        "/images/coach-type",
+        { coach_type: coachType, image_ids: imageIds },
+      )
       .then((r) => r.data),
 };
 

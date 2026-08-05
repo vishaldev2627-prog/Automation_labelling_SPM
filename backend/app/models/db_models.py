@@ -149,6 +149,89 @@ class ExportGateExemption(Base):
     image_id: Mapped[str] = mapped_column(String, primary_key=True)
 
 
+class DatasetSnapshot(Base):
+    """A record of one immutable dataset snapshot (M2).
+
+    The snapshot itself is a content-addressed directory on disk (see
+    snapshot_service); this table is the index over them, so "which snapshots
+    exist, from which class map, published where" is a query rather than a
+    directory listing.
+
+    `snapshot_id` is unique **globally, not per view**: it is a content hash, so
+    two views producing the identical file set and class map genuinely are the
+    same dataset. Re-exporting unchanged data therefore updates this row's
+    `last_exported_at` rather than inserting a duplicate.
+
+    Rows are append-only in spirit - a snapshot's identity and manifest never
+    change. Only the publishing columns are updated, since publishing is a
+    separate, retryable step against already-immutable content.
+    """
+
+    __tablename__ = "dataset_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    dataset_view: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    class_map_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    class_map_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    manifest: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    local_path: Mapped[str] = mapped_column(String, nullable=False)
+    file_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_uri: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_exported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
+
+    created_by: Mapped["Annotator | None"] = relationship()
+
+
+class ClassMapVersion(Base):
+    """An immutable snapshot of one dataset view's class map (M1).
+
+    Never updated, never deleted - a change to the id->name mapping or to
+    `exclude_classes` mints a new row (see class_map_service). This is what a
+    dataset snapshot pins so that "class 7" is answerable years later, and it is
+    the fix for the build plan's `[HIGH]` class-map-drift risk, which already
+    materialized once on this project as a 27-class remap.
+
+    Two unique constraints, doing different jobs:
+      - `(dataset_view, version)` gives per-view monotonic numbering that is
+        never reused.
+      - `(dataset_view, content_hash)` makes minting idempotent, so calling
+        ensure_version() on every dataset load records genuine drift without
+        creating a version per load.
+
+    `names` is `[[class_id, name], ...]` ordered by id, not an object keyed by
+    stringified ints - see class_map_service.canonical_payload for why.
+
+    Deliberately excluded from the hashed content: colour, `safety_critical`,
+    `fine_structure`. Those live on DatasetClass and are tool-side metadata; a
+    curator fixing a safety flag must not invalidate the class map that previous
+    snapshots pinned.
+    """
+
+    __tablename__ = "class_map_versions"
+    __table_args__ = (
+        UniqueConstraint("dataset_view", "version", name="uq_class_map_versions_view_version"),
+        UniqueConstraint("dataset_view", "content_hash", name="uq_class_map_versions_view_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dataset_view: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    names: Mapped[list] = mapped_column(JSONB, nullable=False)
+    exclude_classes: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
+
+    created_by: Mapped["Annotator | None"] = relationship()
+
+
 class DatasetClass(Base):
     """One class definition (id/name/color) for one dataset view - replaces
     `_meta.json`'s {"classes": [...], "colors": {...}} and is the DB source
@@ -162,6 +245,20 @@ class DatasetClass(Base):
     corrosion/shelling) by the migration that adds this column - an
     engineering starting point for a domain expert to review and correct,
     not a certified list. Editable per-class via the API/UI.
+
+    `fine_structure` marks classes whose value lives in thin, branching,
+    length-measured detail - crack, corrosion, wheel shelling. The pipeline
+    scores these on Dice/IoU **plus length-recall** (docs/pipeline.md §5.4)
+    and shelling length (§5.5), all of which our default polygon path
+    degraded: largest-contour-only dropped every piece of a branching crack
+    but one, and Douglas-Peucker smoothed away the thin structure being
+    measured. A flagged class keeps all contours, skips simplification, and
+    exports a binary mask raster alongside the polygon.
+
+    Deliberately a separate flag from `safety_critical`, not a reuse of it:
+    they answer different questions. A wheel is safety-critical and its
+    outline is a blob that simplifies fine; a crack across that wheel is the
+    fine-structure case. Seeded by its own, narrower keyword set.
     """
 
     __tablename__ = "dataset_classes"
@@ -173,3 +270,4 @@ class DatasetClass(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     color: Mapped[str] = mapped_column(String, nullable=False)
     safety_critical: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    fine_structure: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

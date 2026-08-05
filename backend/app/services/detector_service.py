@@ -5,11 +5,23 @@ and marked complete (the same trust boundary export already uses), then runs
 the most recently trained model on brand-new images that have no existing
 labels at all - so boxes/classes it already learned show up automatically
 instead of needing everything drawn by hand.
+
+Registry and weights are scoped **per dataset view**, not per models_dir:
+DetectorService is session-scoped (see app.session_context) and each session
+can have a different view loaded, but models_dir is one shared host path. A
+single global registry therefore let a detector trained while `buffer` was
+loaded become the active auto-detect model for `side_view` annotators too -
+with buffer's class list, so class ids meant different components in the two
+views. Scoping by `dataset_service.dataset_key` makes that collision
+structurally impossible instead of relying on nobody training two views in
+the same afternoon.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import random
+import re
 import shutil
 import threading
 import time
@@ -17,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.models.schemas import BoundingBox, DetectorInfo, DetectorTrainJobStatus, ObjectStatus
-from app.services.dataset_service import DatasetService
+from app.services.dataset_service import DatasetNotFoundError, DatasetService
 from app.utils.file_utils import atomic_write_json, new_id, read_json
 
 logger = logging.getLogger(__name__)
@@ -26,6 +38,28 @@ MODEL_WEIGHTS = "yolov8s.pt"
 EPOCHS = 100
 VAL_SPLIT = 0.1
 MIN_TRAINING_IMAGES = 2
+
+# Per-view registries/weights live under this subdirectory of models_dir. The
+# pre-existing global `detector_registry.json` + `detector_v*.pt` at the top
+# level are deliberately left untouched (see _adopt_legacy_registry).
+DETECTORS_SUBDIR = "detectors"
+LEGACY_REGISTRY_NAME = "detector_registry.json"
+
+_SLUG_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _slug_for(dataset_key: str) -> str:
+    """A filesystem-safe, collision-resistant directory name for a dataset key.
+
+    `dataset_key` is currently a resolved absolute path (see
+    annotation_state_repo's module docstring), so the basename alone isn't
+    unique across two roots with the same last segment - hence the short
+    hash suffix. Keeping the readable part first means an operator can still
+    tell which directory belongs to which view by looking at it.
+    """
+    digest = hashlib.sha1(dataset_key.encode("utf-8")).hexdigest()[:10]
+    readable = _SLUG_UNSAFE.sub("_", Path(dataset_key).name).strip("_") or "dataset"
+    return f"{readable}-{digest}"
 
 
 class DetectorService:
@@ -40,23 +74,114 @@ class DetectorService:
         self._lock = threading.Lock()
         self._loaded_model = None
         self._loaded_model_path: Optional[Path] = None
+        # Slugs whose legacy-registry adoption was already evaluated and
+        # declined - see _adopt_legacy_registry for why this is cached.
+        self._legacy_adoption_declined: set[str] = set()
 
     # ------------------------------------------------------------- registry
     @property
+    def _view_dir(self) -> Path:
+        """Per-dataset-view directory holding this view's registry + weights.
+
+        Raises DatasetNotFoundError (via dataset_key) if no dataset is
+        loaded - there is no such thing as "the active detector" without a
+        view to scope it to. Callers that must not fail on that
+        (is_active/get_info) handle it explicitly.
+        """
+        return self._models_dir / DETECTORS_SUBDIR / _slug_for(self._ds.dataset_key)
+
+    @property
     def _registry_path(self) -> Path:
-        return self._models_dir / "detector_registry.json"
+        return self._view_dir / "registry.json"
 
     def _load_registry(self) -> dict:
-        return read_json(self._registry_path, default={})
+        registry = read_json(self._registry_path, default={})
+        if not registry.get("version"):
+            registry = self._adopt_legacy_registry()
+        return registry
+
+    def _adopt_legacy_registry(self) -> dict:
+        """Migrate the pre-per-view global registry into this view - but only
+        when it provably belongs to this view.
+
+        The old global `models_dir/detector_registry.json` recorded a
+        `classes` list but not which view produced it, so adopting it blindly
+        would recreate exactly the cross-view mix-up this scoping exists to
+        prevent. Adopt only on an exact class-list match with this view's
+        current class names; otherwise leave it alone and log, so an operator
+        can see why their previously-active detector didn't carry over
+        instead of silently getting no auto-detect.
+
+        Never moves or deletes the legacy files - they stay where they are as
+        a fallback if this adoption turns out to be wrong.
+
+        The per-view "already decided not to adopt" set exists because
+        is_active() runs on every image open (dataset_service._try_auto_detect);
+        without it, a non-adoptable legacy registry would re-stat the file and
+        re-log the same warning once per image.
+        """
+        try:
+            slug = _slug_for(self._ds.dataset_key)
+        except DatasetNotFoundError:
+            return {}
+        if slug in self._legacy_adoption_declined:
+            return {}
+
+        legacy_path = self._models_dir / LEGACY_REGISTRY_NAME
+        legacy = read_json(legacy_path, default={})
+        if not legacy.get("version"):
+            self._legacy_adoption_declined.add(slug)
+            return {}
+
+        try:
+            current_classes = [c.name for c in self._ds.get_classes()]
+        except DatasetNotFoundError:
+            return {}
+
+        if list(legacy.get("classes") or []) != current_classes:
+            logger.warning(
+                "Legacy global detector registry at %s not adopted for view %s: its class list "
+                "does not match this view's classes, so which view trained it can't be established. "
+                "Retrain to get an active detector for this view.",
+                legacy_path,
+                self._ds.dataset_key,
+            )
+            self._legacy_adoption_declined.add(slug)
+            return {}
+
+        weights = Path(legacy.get("path", ""))
+        if not weights.exists():
+            logger.warning(
+                "Legacy detector registry at %s points at missing weights %s; not adopted.",
+                legacy_path,
+                weights,
+            )
+            self._legacy_adoption_declined.add(slug)
+            return {}
+
+        adopted = dict(legacy)
+        adopted["adopted_from_legacy_registry"] = str(legacy_path)
+        self._save_registry(adopted)
+        logger.info(
+            "Adopted legacy global detector registry into view %s (class list matched exactly).",
+            self._ds.dataset_key,
+        )
+        return adopted
 
     def _save_registry(self, data: dict) -> None:
         atomic_write_json(self._registry_path, data)
 
     def is_active(self) -> bool:
-        return bool(self._load_registry().get("version"))
+        try:
+            return bool(self._load_registry().get("version"))
+        except DatasetNotFoundError:
+            return False
 
     def get_info(self) -> DetectorInfo:
-        reg = self._load_registry()
+        try:
+            reg = self._load_registry()
+        except DatasetNotFoundError:
+            return DetectorInfo(active=False)
         if not reg.get("version"):
             return DetectorInfo(active=False)
         return DetectorInfo(
@@ -141,7 +266,8 @@ class DetectorService:
 
             registry = self._load_registry()
             new_version = registry.get("version", 0) + 1
-            dest = self._models_dir / f"detector_v{new_version}.pt"
+            dest = self._view_dir / f"detector_v{new_version}.pt"
+            dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(best_weights, dest)
             registry.update(
                 {
@@ -150,6 +276,10 @@ class DetectorService:
                     "num_images": num_images,
                     "classes": classes,
                     "path": str(dest),
+                    # Recorded so a registry file is self-describing about
+                    # which view's annotations produced it - the thing the
+                    # old global registry could not answer.
+                    "dataset_key": self._ds.dataset_key,
                 }
             )
             self._save_registry(registry)
@@ -185,7 +315,13 @@ class DetectorService:
             for image_id in ids:
                 annotations = self._ds.get_annotations(image_id)
                 objects = [o for o in annotations.objects if o.status != ObjectStatus.REJECTED]
-                if not objects:
+                # An empty frame is included only when a human confirmed it is
+                # empty (see ImageAnnotations) - then it's a background/negative
+                # sample, written as an empty label file, which is what
+                # ultralytics expects and which teaches the pre-labeler where
+                # *not* to propose boxes. An unconfirmed empty frame is still
+                # skipped: it just means nobody has annotated it yet.
+                if not objects and not annotations.no_objects_confirmed:
                     continue
                 src_image = self._ds.get_image_path(image_id)
                 shutil.copy2(src_image, img_dir / src_image.name)
@@ -193,7 +329,11 @@ class DetectorService:
                     f"{o.class_id} {o.bbox.x_center:.6f} {o.bbox.y_center:.6f} {o.bbox.width:.6f} {o.bbox.height:.6f}"
                     for o in objects
                 ]
-                (lbl_dir / f"{image_id}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+                # Truly empty, not a single blank line - a stray "\n" is a
+                # malformed label line to some YOLO loaders.
+                (lbl_dir / f"{image_id}.txt").write_text(
+                    "\n".join(lines) + "\n" if lines else "", encoding="utf-8"
+                )
                 total_images += 1
 
         import yaml

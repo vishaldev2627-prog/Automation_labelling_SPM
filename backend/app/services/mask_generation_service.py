@@ -11,7 +11,7 @@ import numpy as np
 from app.config import Settings
 from app.models.schemas import AnnotationObject, ImageAnnotations, ObjectStatus, Point
 from app.services.dataset_service import DatasetService
-from app.services.polygon_service import mask_to_polygon
+from app.services.polygon_service import mask_to_polygons
 from app.services.sam_service import SAMService
 from app.utils.image_utils import compute_file_hash, read_image_rgb
 
@@ -42,6 +42,25 @@ class MaskGenerationService:
                     self._image_cache.pop(oldest_key, None)
         return img_rgb, cache_key
 
+    def _contours_for(self, obj: AnnotationObject, mask: np.ndarray) -> list[list[Point]]:
+        """Mask -> polygon(s), picking the lossy or the faithful path by the
+        object's class.
+
+        For a `fine_structure` class (crack/corrosion/shelling) every contour is
+        kept and simplification is off, because those classes are scored on
+        Dice/IoU **plus length-recall** and both largest-contour-only and
+        Douglas-Peucker destroy that. For every other class the existing
+        single-simplified-polygon behaviour is unchanged - a component outline
+        is a blob and simplifying it is a feature, not a loss.
+        """
+        fine = self._ds.is_fine_structure(obj.class_id)
+        return mask_to_polygons(
+            mask,
+            epsilon_ratio=0.0 if fine else self._settings.polygon_epsilon_ratio,
+            min_points=self._settings.min_polygon_points,
+            all_contours=fine,
+        )
+
     def generate_for_object(
         self,
         image_id: str,
@@ -64,18 +83,20 @@ class MaskGenerationService:
 
         best_idx = result.best_index
         confidence = float(result.scores[best_idx])
-        polygon = (
-            mask_to_polygon(
-                result.masks[best_idx],
-                epsilon_ratio=self._settings.polygon_epsilon_ratio,
-                min_points=self._settings.min_polygon_points,
-            )
+        polygons = (
+            self._contours_for(obj, result.masks[best_idx])
             if confidence > self._settings.mask_confidence_threshold
             else []
         )
+        polygon = polygons[0] if polygons else []
 
         obj.polygon = polygon
-        obj.confidence = confidence
+        obj.extra_polygons = polygons[1:]
+        # mask_confidence only - never obj.detector_confidence. Writing SAM2's
+        # mask score over the detector's class confidence is exactly the
+        # conflation AnnotationObject's docstring describes, and it silently
+        # fed auto_accept_service's gate.
+        obj.mask_confidence = confidence
         obj.all_mask_scores = [float(s) for s in result.scores]
         obj.selected_mask_index = best_idx
         obj.status = ObjectStatus.AUTO_GENERATED if polygon else ObjectStatus.PENDING
@@ -88,13 +109,10 @@ class MaskGenerationService:
         box_xyxy = obj.bbox.to_xyxy(w, h)
         result = self._sam.predict_box(img_rgb, cache_key, box_xyxy)
         mask_index = max(0, min(mask_index, len(result.scores) - 1))
-        polygon = mask_to_polygon(
-            result.masks[mask_index],
-            epsilon_ratio=self._settings.polygon_epsilon_ratio,
-            min_points=self._settings.min_polygon_points,
-        )
-        obj.polygon = polygon
-        obj.confidence = float(result.scores[mask_index])
+        polygons = self._contours_for(obj, result.masks[mask_index])
+        obj.polygon = polygons[0] if polygons else []
+        obj.extra_polygons = polygons[1:]
+        obj.mask_confidence = float(result.scores[mask_index])
         obj.all_mask_scores = [float(s) for s in result.scores]
         obj.selected_mask_index = mask_index
         return obj

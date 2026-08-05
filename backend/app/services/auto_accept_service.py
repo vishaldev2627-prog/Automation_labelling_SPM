@@ -3,7 +3,16 @@ track record - the "700-800 frames/coach shouldn't mean 700-800 manual
 clicks" lever (plan §4.3/4.4, see annotation_module_build_plan.md).
 
 Conservative by design, per product decision:
-- CONFIDENCE_THRESHOLD is high (0.95), not a "probably fine" bar.
+- Both confidence bars are high (0.95), not a "probably fine" bar - and there
+  are now genuinely two of them. This module used to read a single
+  `confidence` field which, after mask generation ran, held SAM2's *mask*
+  score rather than the detector's class confidence (see AnnotationObject's
+  docstring) - so it could skip human review because a polygon looked clean,
+  not because the class was certain. An object now needs the detector to be
+  sure about the class **and** SAM2 to be sure about the mask.
+- An object with no detector confidence at all (`None` - a box read from a
+  plain YOLO label file, or anything annotated before the two signals were
+  split apart) is never eligible. Absence of signal is not evidence.
 - A class is only eligible once it has a *proven* audit-sample track record
   (see review_service.get_class_audit_stats) - a class nobody has actually
   checked yet is never eligible, no matter how confident the detector is.
@@ -31,11 +40,23 @@ from app.services import review_service
 from app.services.annotator_service import SYSTEM_ANNOTATOR_NAME, get_or_create_annotator
 from app.services.dataset_service import DatasetService
 
-CONFIDENCE_THRESHOLD = 0.95
+DETECTOR_CONFIDENCE_THRESHOLD = 0.95  # is the class right?
+MASK_CONFIDENCE_THRESHOLD = 0.95  # is the polygon right?
 MIN_AUDIT_SAMPLE = 10  # need at least this many audit_sample reviews of a class before trusting it at all
 MIN_APPROVAL_RATE = 1.0  # zero tolerated rejections in that sample - conservative, not "mostly fine"
 
 CANDIDATE_LIMIT = 200
+
+
+def _object_is_acceptable(obj: dict, eligible_class_ids: set[int]) -> bool:
+    """One object clears the bar: eligible class, detector sure of the class,
+    SAM2 sure of the mask. Missing detector confidence fails closed."""
+    if obj.get("class_id") not in eligible_class_ids:
+        return False
+    detector_confidence = obj.get("detector_confidence")
+    if detector_confidence is None or detector_confidence < DETECTOR_CONFIDENCE_THRESHOLD:
+        return False
+    return obj.get("mask_confidence", 0.0) >= MASK_CONFIDENCE_THRESHOLD
 
 
 def eligible_class_ids(db: Session, ds: DatasetService) -> set[int]:
@@ -76,9 +97,7 @@ def find_candidates(db: Session, ds: DatasetService, limit: int = CANDIDATE_LIMI
         objects = state.get("objects", [])
         if not objects:
             continue  # nothing to auto-accept
-        if all(
-            o.get("class_id") in eligible and o.get("confidence", 0.0) >= CONFIDENCE_THRESHOLD for o in objects
-        ):
+        if all(_object_is_acceptable(o, eligible) for o in objects):
             candidates.append(TriageItem(image_id=item.image_id, file_name=item.file_name, tier="auto_accept", score=0.0))
         if len(candidates) >= limit:
             break
@@ -92,14 +111,28 @@ def bulk_accept(db: Session, ds: DatasetService, image_ids: list[str]) -> int:
     of the mechanism. Silently skips any id that's already completed or
     has no saved state, rather than erroring the whole batch over one
     stale id (the candidate list a caller acts on may be slightly stale by
-    the time they submit it)."""
+    the time they submit it).
+
+    **Every id is re-checked against the same bar find_candidates() used**,
+    rather than trusted because it appeared in some earlier preview. The
+    endpoint takes an arbitrary caller-supplied id list, so without this the
+    "safety_critical classes never auto-accept, full stop" rule (plan §4.4)
+    held only for callers that happened to ask politely - a stale preview, a
+    hand-written POST, or a class flipped to safety-critical between preview
+    and execute would all have walked straight through. A rejected id is
+    skipped like any other stale one, not an error for the whole batch.
+    """
     system = get_or_create_annotator(db, SYSTEM_ANNOTATOR_NAME)
     dataset_key = ds.dataset_key
+    eligible = eligible_class_ids(db, ds)
 
     accepted = 0
     for image_id in image_ids:
         state = state_repo.get_state(db, dataset_key, image_id)
         if state is None:
+            continue
+        objects = state.get("objects", [])
+        if not objects or not all(_object_is_acceptable(o, eligible) for o in objects):
             continue
         annotations = ImageAnnotations.model_validate(state)
         if annotations.completed:
@@ -116,7 +149,11 @@ def bulk_accept(db: Session, ds: DatasetService, image_ids: list[str]) -> int:
             system.id,
             "approved",
             "auto_accept",
-            notes=f"Confidence >= {CONFIDENCE_THRESHOLD}, all classes audit-verified (>= {MIN_AUDIT_SAMPLE} reviews, {MIN_APPROVAL_RATE:.0%} approval)",
+            notes=(
+                f"detector_confidence >= {DETECTOR_CONFIDENCE_THRESHOLD} and "
+                f"mask_confidence >= {MASK_CONFIDENCE_THRESHOLD}, all classes audit-verified "
+                f"(>= {MIN_AUDIT_SAMPLE} reviews, {MIN_APPROVAL_RATE:.0%} approval)"
+            ),
         )
         accepted += 1
     return accepted

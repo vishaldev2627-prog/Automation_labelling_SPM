@@ -105,6 +105,21 @@ def _reviewed_image_ids(db: Session, dataset_key: str, reason: str) -> set[str]:
     return {r[0] for r in rows}
 
 
+def get_reviewed_image_ids(db: Session, dataset_key: str, reason: str) -> set[str]:
+    """Public wrapper over the private helper - the snapshot manifest's
+    provenance block needs these sets (second_review / audit_sample /
+    auto_accept) and should not reach into a module private."""
+    return _reviewed_image_ids(db, dataset_key, reason)
+
+
+def get_exempt_image_ids(db: Session, dataset_key: str, image_ids: list[str]) -> set[str]:
+    """Grandfathered images - exportable without a second review only because
+    they were completed before that gate existed. The snapshot manifest reports
+    the count, because a non-zero value means a model trained on that snapshot
+    cannot claim all its data was second-reviewed."""
+    return _exempt_image_ids(db, dataset_key, image_ids)
+
+
 def get_pending_second_review(db: Session, ds: DatasetService, limit: int = 100) -> list[TriageItem]:
     """Completed images that need a second_review decision to become
     export-eligible - excludes grandfathered (exempt) images, since those

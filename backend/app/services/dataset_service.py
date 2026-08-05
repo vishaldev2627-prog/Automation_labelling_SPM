@@ -27,6 +27,7 @@ from app.models.schemas import (
     ObjectStatus,
 )
 from app.services import annotation_state_repo as state_repo
+from app.services import class_map_service
 from app.session_context import get_current_annotator
 from app.utils.file_utils import image_stem_to_label_path, new_id
 from app.utils.image_utils import get_image_dimensions, list_images
@@ -61,6 +62,16 @@ def _get_class_list_lock(root: Path) -> threading.Lock:
 # dataset, not a certified list - a domain expert should review it.
 SAFETY_KEYWORD_PATTERN = re.compile(r"(wheel|brake|axle|suspension|disc|spring|crack|corrosion|shelling)", re.IGNORECASE)
 
+# Deliberately narrower than SAFETY_KEYWORD_PATTERN: fine_structure is about
+# defect *morphology* (thin, branching, length-measured), not safety tier. A
+# wheel component outline is a blob that simplifies fine; a crack across it is
+# the fine-structure case. Matching 'wheel' here would flag every wheel
+# component and write mask rasters nobody needs. Same caveat as above - a
+# starting point for a domain expert, not a certified list.
+FINE_STRUCTURE_KEYWORD_PATTERN = re.compile(
+    r"(crack|corrosion|shelling|scratch|flaking|spalling|tread)", re.IGNORECASE
+)
+
 DEFAULT_PALETTE = [
     "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4",
     "#46f0f0", "#f032e6", "#bcf60c", "#fabebe", "#008080", "#e6beff",
@@ -78,6 +89,17 @@ class ImageNotFoundError(Exception):
     pass
 
 
+class ExcludedClassError(Exception):
+    """A class the pipeline never serves, so labeling it is never useful.
+
+    `exclude_classes: [leakage]` (docs/pipeline.md §12, FINAL_AIML §10) names an
+    all-synthetic class excluded from serving. The build plan requires enforcing
+    that at the tool level, not at export - refusing the class up front beats
+    letting someone annotate for a week and then explaining why those labels
+    were dropped.
+    """
+
+
 class DatasetService:
     """Manages dataset indexing and per-image annotation persistence."""
 
@@ -92,6 +114,9 @@ class DatasetService:
         self._classes: list[str] = []
         self._colors: dict[str, str] = {}
         self._safety: dict[str, bool] = {}
+        self._fine_structure: dict[str, bool] = {}
+        self._class_map_version: Optional[int] = None
+        self._class_map_hash: Optional[str] = None
         self._loaded = False
 
     # ------------------------------------------------------------- loading
@@ -122,6 +147,7 @@ class DatasetService:
             self._classes = raw_classes
 
             self._load_class_colors()
+            self._sync_class_map_version()
             self._loaded = True
             logger.info("Loaded dataset at %s: %d images, %d classes", root, len(images), len(self._classes))
             return self.get_dataset_info()
@@ -155,17 +181,68 @@ class DatasetService:
                 if key not in colors:
                     colors[key] = DEFAULT_PALETTE[i % len(DEFAULT_PALETTE)]
             self._colors = colors
-            self._safety = state_repo.get_safety_flags(db, self._dataset_key)
             default_safety = {
                 str(i): bool(SAFETY_KEYWORD_PATTERN.search(name)) for i, name in enumerate(self._classes)
             }
-            state_repo.save_colors_bulk(db, self._dataset_key, self._classes, self._colors, default_safety)
-            # Re-read: save_colors_bulk only applies default_safety to
-            # brand-new rows, so this picks up the value that actually
-            # landed (curator's existing choice, or the new default).
+            default_fine_structure = {
+                str(i): bool(FINE_STRUCTURE_KEYWORD_PATTERN.search(name))
+                for i, name in enumerate(self._classes)
+            }
+            state_repo.save_colors_bulk(
+                db, self._dataset_key, self._classes, self._colors, default_safety, default_fine_structure
+            )
+            # Re-read: save_colors_bulk only applies the defaults to brand-new
+            # rows, so this picks up the values that actually landed (curator's
+            # existing choices, or the new defaults).
             self._safety = state_repo.get_safety_flags(db, self._dataset_key)
+            self._fine_structure = state_repo.get_fine_structure_flags(db, self._dataset_key)
         finally:
             db.close()
+
+    def _sync_class_map_version(self) -> None:
+        """Resolve the on-disk class list to an immutable class-map version,
+        minting one if this exact map has not been seen before.
+
+        Called on every load, deliberately: the class list's source of truth is
+        still `data.yaml`/`classes.txt`, which a person can edit by hand, so
+        drift has to be detected rather than assumed away. Minting is idempotent
+        by content hash (see class_map_service), so a normal load creates
+        nothing.
+
+        Never raises into the load path: a class-map version is an audit record,
+        and failing to write one must not make the dataset unopenable. It is
+        logged loudly instead, and the next load retries.
+        """
+        annotator_id, _ = get_current_annotator()
+        db = SessionLocal()
+        try:
+            version = class_map_service.ensure_version(
+                db,
+                self._dataset_key,
+                self._classes,
+                self._settings.exclude_class_list,
+                annotator_id,
+            )
+            self._class_map_version = version.version
+            self._class_map_hash = version.content_hash
+        except Exception:
+            logger.exception(
+                "Could not resolve a class-map version for %s; dataset still loaded, "
+                "but snapshots taken now cannot pin a class map",
+                self._dataset_key,
+            )
+            self._class_map_version = None
+            self._class_map_hash = None
+        finally:
+            db.close()
+
+    @property
+    def class_map_version(self) -> Optional[int]:
+        return self._class_map_version
+
+    @property
+    def class_map_hash(self) -> Optional[str]:
+        return self._class_map_hash
 
     def get_classes(self) -> list[ClassInfo]:
         return [
@@ -174,6 +251,7 @@ class DatasetService:
                 name=name,
                 color=self._colors.get(str(i), DEFAULT_PALETTE[i % len(DEFAULT_PALETTE)]),
                 safety_critical=self._safety.get(str(i), False),
+                fine_structure=self._fine_structure.get(str(i), False),
             )
             for i, name in enumerate(self._classes)
         ]
@@ -199,6 +277,23 @@ class DatasetService:
                 raise ValueError(f"No class {class_id} in this dataset view")
             self._safety[str(class_id)] = safety_critical
 
+    def set_class_fine_structure(self, class_id: int, fine_structure: bool) -> None:
+        """Toggle whether this class's masks preserve thin/branching detail -
+        all contours kept, no simplification, mask raster exported. See
+        DatasetClass.fine_structure for why it is separate from safety_critical."""
+        with self._lock:
+            db = SessionLocal()
+            try:
+                found = state_repo.set_class_fine_structure(db, self._dataset_key, class_id, fine_structure)
+            finally:
+                db.close()
+            if not found:
+                raise ValueError(f"No class {class_id} in this dataset view")
+            self._fine_structure[str(class_id)] = fine_structure
+
+    def is_fine_structure(self, class_id: int) -> bool:
+        return self._fine_structure.get(str(class_id), False)
+
     def add_class(self, name: str) -> ClassInfo:
         """Add a new class the detector never saw, persisting it back to disk
         (classes.txt or data.yaml) so it survives the next dataset reload.
@@ -215,6 +310,15 @@ class DatasetService:
         name = name.strip()
         if not name:
             raise ValueError("Class name cannot be empty")
+        if self._settings.is_excluded_class(name):
+            # The build plan requires excluding these at the tool level rather
+            # than filtering at export - a label that can never be shipped is
+            # wasted annotator time, and it is cheaper to refuse the class than
+            # to explain later why those labels vanished.
+            raise ExcludedClassError(
+                f"'{name}' is in exclude_classes and is never served by the pipeline, "
+                f"so it cannot be labeled here. Excluded: {self._settings.exclude_class_list}"
+            )
         root = self._images_dir.parent
         with _get_class_list_lock(root):
             current = load_class_names(root)
@@ -226,16 +330,33 @@ class DatasetService:
             color = DEFAULT_PALETTE[class_id % len(DEFAULT_PALETTE)]
             self._colors[str(class_id)] = color
             safety_critical = bool(SAFETY_KEYWORD_PATTERN.search(name))
+            fine_structure = bool(FINE_STRUCTURE_KEYWORD_PATTERN.search(name))
             db = SessionLocal()
             try:
                 state_repo.save_colors_bulk(
-                    db, self._dataset_key, self._classes, self._colors, {str(class_id): safety_critical}
+                    db,
+                    self._dataset_key,
+                    self._classes,
+                    self._colors,
+                    {str(class_id): safety_critical},
+                    {str(class_id): fine_structure},
                 )
             finally:
                 db.close()
             self._safety[str(class_id)] = safety_critical
+            self._fine_structure[str(class_id)] = fine_structure
             self._persist_class_names()
-            return ClassInfo(class_id=class_id, name=name, color=color, safety_critical=safety_critical)
+            # The class map just changed, so it is a new map - mint the version
+            # now rather than waiting for the next dataset load, so a snapshot
+            # taken in between pins what is actually on disk.
+            self._sync_class_map_version()
+            return ClassInfo(
+                class_id=class_id,
+                name=name,
+                color=color,
+                safety_critical=safety_critical,
+                fine_structure=fine_structure,
+            )
 
     def _persist_class_names(self) -> None:
         """Write the current class list back to whichever file the dataset
@@ -321,8 +442,9 @@ class DatasetService:
         if pre_existing:
             # Pre-existing ground-truth-style boxes from labels/*.txt carry
             # no confidence value at all (plain YOLO label files never do) -
-            # 0.0 here means "no confidence signal", not "low confidence".
-            detections = [(class_id, bbox, 0.0) for class_id, bbox in pre_existing]
+            # hence None, not 0.0: "no signal" and "low confidence" are
+            # different facts and 0.0 conflated them (see AnnotationObject).
+            detections = [(class_id, bbox, None) for class_id, bbox in pre_existing]
         else:
             detections = self._try_auto_detect(path)
         objects = [
@@ -331,10 +453,10 @@ class DatasetService:
                 class_id=class_id,
                 class_name=self._classes[class_id] if class_id < len(self._classes) else f"class_{class_id}",
                 bbox=bbox,
-                confidence=confidence,
+                detector_confidence=detector_confidence,
                 status=ObjectStatus.PENDING,
             )
-            for class_id, bbox, confidence in detections
+            for class_id, bbox, detector_confidence in detections
         ]
         annotations = ImageAnnotations(
             image_id=image_id,
@@ -346,7 +468,7 @@ class DatasetService:
         )
         return annotations
 
-    def _try_auto_detect(self, path: Path) -> list[tuple[int, BoundingBox, float]]:
+    def _try_auto_detect(self, path: Path) -> list[tuple[int, BoundingBox, Optional[float]]]:
         """Fall back to the most recently trained detector for images that
         have no pre-existing detection labels at all."""
         try:

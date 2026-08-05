@@ -19,6 +19,14 @@ SQLAlchemy==2.0.35
 alembic==1.13.3
 psycopg[binary]==3.2.3
 
+# S3/MinIO client for publishing dataset snapshots to the staging store
+# (app/services/object_store.py). Imported lazily, so a deployment that never
+# publishes does not need it at runtime - but it is pinned here because the
+# publish path is part of the shipped feature, not an optional extra.
+# boto3 rather than the `minio` SDK: MinIO speaks S3, so pointing at real S3
+# later is an endpoint change instead of a rewrite.
+boto3==1.35.36
+
 # Detector training/inference (fine-tunes a YOLOv8 model on your corrected
 # annotations; see app/services/detector_service.py)
 ultralytics

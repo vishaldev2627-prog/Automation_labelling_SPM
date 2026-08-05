@@ -188,13 +188,34 @@ export default function Toolbar() {
     }
   };
 
+  /** "sha256:abc123…" -> "abc123de" — enough to quote in a ticket, short enough
+   * to fit in a toast. The full id is in the export response and the manifest. */
+  const shortSnapshotId = (snapshotId: string) => snapshotId.replace(/^sha256:/, "").slice(0, 8);
+
   const handleExport = async () => {
     try {
       const result = await toast.promise(ExportAPI.export([], true), {
         loading: "Exporting...",
-        success: (r: any) => `Exported ${r.exported} images to ${r.output_dir}`,
+        // Exports are immutable content-addressed snapshots now, so the useful
+        // thing to report is the snapshot id and whether this content was new.
+        // `snapshot_created: false` means an identical snapshot already existed,
+        // which is a success, not a no-op to hide.
+        success: (r: any) =>
+          r.snapshot_id
+            ? `${r.snapshot_created ? "Snapshot created" : "Identical snapshot already existed"}: ` +
+              `${r.exported} images, ${shortSnapshotId(r.snapshot_id)}`
+            : `Exported ${r.exported} images to ${r.output_dir}`,
         error: "Export failed",
       });
+      if (result?.publish?.error) {
+        toast.error(`Snapshot written, but publishing failed: ${result.publish.error}`);
+      }
+      if (result?.split_integrity_ok === false) {
+        toast.error(
+          "Snapshot has split-integrity violations — propagated or auto-accepted labels " +
+            "landed outside the train split. Recorded in the manifest.",
+        );
+      }
       return result;
     } catch {
       /* handled by toast */
