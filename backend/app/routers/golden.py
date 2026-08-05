@@ -8,7 +8,7 @@ to write to it.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.config import get_settings
 from app.db import SessionLocal
@@ -35,6 +35,45 @@ def _to_info(db, golden_set, item_count: int | None = None) -> GoldenSetInfo:
         created_by=golden_set.created_by.name if golden_set.created_by else None,
         item_count=len(golden_repo.list_items(db, golden_set.id)) if item_count is None else item_count,
     )
+
+
+@router.get("/propose")
+def propose_candidates(
+    target_count: int = Query(default=200, ge=1, le=5000),
+    min_per_class: int = Query(default=5, ge=1, le=100),
+    treat_all_labeled_as_reviewed: bool = Query(
+        default=False,
+        description=(
+            "Only set this when a curator has out-of-band confidence in the whole dataset "
+            "(e.g. it predates this tool's second-review gate entirely, so no review trail "
+            "will ever exist for it). Default False requires images to have actually passed "
+            "second review."
+        ),
+    ),
+) -> list[str]:
+    """Read-only: propose a golden-set candidate list from the currently
+    loaded view's reviewed images (see golden_service.propose_candidates for
+    what "reviewed" means and when the override applies). Does not write
+    anything - a curator reviews this list, then commits it via `POST /sets`
+    + `POST /sets/{id}/items` same as any other golden-set write.
+    """
+    ds = get_dataset_service()
+    try:
+        ds.require_loaded()
+    except DatasetNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    db = SessionLocal()
+    try:
+        return golden_service.propose_candidates(
+            db,
+            ds,
+            target_count=target_count,
+            min_per_class=min_per_class,
+            treat_all_labeled_as_reviewed=treat_all_labeled_as_reviewed,
+        )
+    finally:
+        db.close()
 
 
 @router.post("/sets", response_model=GoldenSetInfo)

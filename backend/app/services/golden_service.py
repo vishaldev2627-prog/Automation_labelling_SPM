@@ -22,8 +22,9 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.models.db_models import Annotator, GoldenSet
 from app.models.schemas import ObjectStatus
-from app.services import golden_repo, object_store
+from app.services import golden_repo, object_store, review_service
 from app.services.dataset_service import DatasetService
+from app.services.golden_selection import ImageLabelSummary, propose_golden_candidates
 from app.utils.yolo_utils import format_segmentation_line
 
 
@@ -59,6 +60,62 @@ def require_golden_curator(db: Session, annotator_id: Optional[int]) -> None:
     annotator = db.query(Annotator).filter(Annotator.id == annotator_id).one_or_none()
     if not _is_golden_curator(annotator):
         raise NotGoldenCuratorError(f"Annotator {annotator_id} is not a golden_curator")
+
+
+def propose_candidates(
+    db: Session,
+    ds: DatasetService,
+    *,
+    target_count: int,
+    min_per_class: int,
+    treat_all_labeled_as_reviewed: bool = False,
+) -> list[str]:
+    """Read-only: assemble this view's real data and run it through
+    `golden_selection.propose_golden_candidates`. Never writes to
+    `golden_sets`/`golden_set_items` - a curator still has to call
+    `create_version` + `add_items` with whatever list they approve, same
+    permission gate as any other golden-set write.
+
+    By default, "reviewed" means **second-reviewed** specifically
+    (`review_service`'s `"second_review"` reason) - not the broader
+    export-eligible set, which also includes grandfathered/exempt images
+    that were never actually independently double-checked. Golden-set
+    population stands on "verified and accurate"; a grandfathered image is
+    exactly the case where that claim doesn't hold *by default*.
+
+    `treat_all_labeled_as_reviewed=True` overrides that for a dataset a
+    curator already has out-of-band confidence in. Concretely: the original
+    ~2000 `side_view` images predate this tool's second-review gate
+    entirely, so `annotation_reviews` has no rows for them at all - the gate
+    can't retroactively certify data it never saw. A curator who already
+    trusts that dataset (it was independently verified before this tool's
+    review workflow existed) can say so explicitly with this flag rather
+    than the selection silently returning nothing because a review trail
+    that was never going to exist doesn't exist. Left `False` by default so
+    a *future*, not-yet-verified dataset doesn't accidentally get the same
+    pass.
+    """
+    image_ids = ds.image_ids()
+    reviewed_ids = review_service.get_reviewed_image_ids(db, ds.dataset_key, "second_review")
+    safety_critical_ids = frozenset(c.class_id for c in ds.get_classes() if c.safety_critical)
+
+    summaries: list[ImageLabelSummary] = []
+    for image_id in image_ids:
+        annotations = ds.get_annotations(image_id)
+        class_ids = frozenset(
+            obj.class_id for obj in annotations.objects if obj.status != ObjectStatus.REJECTED
+        )
+        if not class_ids:
+            continue
+        reviewed = treat_all_labeled_as_reviewed or image_id in reviewed_ids
+        summaries.append(ImageLabelSummary(image_id=image_id, class_ids=class_ids, reviewed=reviewed))
+
+    return propose_golden_candidates(
+        summaries,
+        safety_critical_class_ids=safety_critical_ids,
+        target_count=target_count,
+        min_per_class=min_per_class,
+    )
 
 
 def create_version(
