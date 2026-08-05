@@ -12,7 +12,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Central configuration for the annotation tool backend."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # protected_namespaces=(): pydantic reserves the "model_" prefix for its
+    # own internal fields by default, which would otherwise warn on this
+    # class's genuine model_promotion_* settings (M7.5) - none of which are
+    # pydantic internals, so the protection isn't needed here.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", protected_namespaces=()
+    )
 
     # Dataset
     dataset_path: str = "../dataset"
@@ -146,6 +152,16 @@ class Settings(BaseSettings):
     # an eval failure never turns a successful training run into a
     # reported failure.
     auto_eval_on_golden_set: bool = True
+
+    # M7.5 promotion sync: a background poller checks MLflow's current
+    # Production version against what's already been proposed, on this
+    # interval - detection only, see model_promotion_service.py. Never
+    # touches what's actually live; that always needs an explicit
+    # model_reviewer approval. Safe to leave enabled even with no MLflow
+    # configured - the check degrades to a no-op (logged at debug, not an
+    # error) rather than failing.
+    model_promotion_poll_enabled: bool = True
+    model_promotion_poll_interval_seconds: int = 1800
 
     # Logging
     log_level: str = "INFO"

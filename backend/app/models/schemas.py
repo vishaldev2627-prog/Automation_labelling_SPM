@@ -528,3 +528,18 @@ class GoldenItemResult(BaseModel):
     added: bool
     frozen: bool
     error: Optional[str] = None
+
+
+class ModelPromotionInfo(BaseModel):
+    id: int
+    dataset_view: str
+    mlflow_model_name: str
+    mlflow_version: str
+    mlflow_run_id: str
+    promotion_recommendation: str
+    regressed_classes: Optional[str] = None
+    status: str
+    local_weights_path: Optional[str] = None
+    created_at: datetime
+    decided_at: Optional[datetime] = None
+    decided_by: Optional[str] = None

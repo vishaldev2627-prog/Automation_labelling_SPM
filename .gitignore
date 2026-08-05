@@ -52,6 +52,12 @@ sample_dataset/
 # container's bind mount for smoke-testing M5 without the full stack up.
 mlflow-dev-data/
 
+# MLflow's own local-filesystem fallback (./mlruns) - only ever appears if
+# MLFLOW_TRACKING_URI isn't configured in a given shell/process, so its
+# presence itself is a signal something wasn't wired up right; never
+# meaningful data to keep.
+mlruns/
+
 # Editor / OS
 .vscode/
 .idea/

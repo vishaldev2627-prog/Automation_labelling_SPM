@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +19,7 @@ from app.routers import (
     golden,
     images,
     masks,
+    model_promotions,
     progress,
     review,
     similarity,
@@ -75,6 +77,7 @@ app.include_router(triage.router)
 app.include_router(review.router)
 app.include_router(auto_accept.router)
 app.include_router(golden.router)
+app.include_router(model_promotions.router)
 
 
 @app.on_event("startup")
@@ -102,6 +105,47 @@ def auto_load_dataset() -> None:
 
         get_similarity_service().start_reindex()
         logger.info("Started background similarity indexing for annotation propagation")
+
+    if settings.model_promotion_poll_enabled:
+        _start_model_promotion_poller()
+
+
+def _start_model_promotion_poller() -> None:
+    """M7.5: periodically checks MLflow's current Production version for
+    each known dataset view against what's already been proposed here -
+    detection only, see model_promotion_service.py's own module docstring
+    for why this is deliberately separate from activation. Runs for the
+    life of the process; a single daemon thread, not per-session (unlike
+    most services in this app) since there is exactly one meaningful answer
+    to "what does MLflow currently say", not one per browser tab.
+    """
+    import threading
+    from pathlib import Path
+
+    from app.db import SessionLocal
+    from app.routers.dataset import DATASET_VIEWS
+    from app.services import model_promotion_service
+    from app.services.detector_service import _slug_for
+    from app.services.model_registry_service import registered_model_name
+
+    def _poll_loop() -> None:
+        while True:
+            for view in DATASET_VIEWS:
+                dataset_key = str((Path(settings.dataset_path) / view.key).resolve())
+                model_name = registered_model_name(_slug_for(dataset_key))
+                db = SessionLocal()
+                try:
+                    model_promotion_service.check_for_new_production_version(db, settings, dataset_key, model_name)
+                except Exception:
+                    logger.exception("Model-promotion check failed for %s; will retry next cycle", view.key)
+                finally:
+                    db.close()
+            time.sleep(settings.model_promotion_poll_interval_seconds)
+
+    threading.Thread(target=_poll_loop, daemon=True).start()
+    logger.info(
+        "Started background model-promotion poller (every %ds)", settings.model_promotion_poll_interval_seconds
+    )
 
 
 @app.get("/api/health")

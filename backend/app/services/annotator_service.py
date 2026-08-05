@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models.db_models import Annotator
 
-VALID_ROLES = ("annotator", "golden_curator", "system")
+VALID_ROLES = ("annotator", "golden_curator", "model_reviewer", "system")
 
 SYSTEM_ANNOTATOR_NAME = "System (auto-accept)"
 

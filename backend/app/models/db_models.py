@@ -335,3 +335,54 @@ class GoldenSetItem(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     golden_set: Mapped["GoldenSet"] = relationship()
+
+
+class ModelPromotion(Base):
+    """One "MLflow says this version is Production, does a human here agree"
+    decision (M7.5).
+
+    This is the second, distinct gate from M7's own promotion-recommendation
+    tags: a curator moving a version to `Production` in MLflow's UI records
+    *their* judgment there; this table records whether a `model_reviewer` in
+    *this* app then actually approved swapping the live-serving model to
+    match it. Deliberately two separate decisions, possibly two separate
+    people - curating what's eligible and deciding what live annotators
+    actually get suggestions from are different responsibilities.
+
+    Append-only in spirit: a row's `status` moves `pending -> approved` or
+    `pending -> rejected` exactly once. A later promotion for the same view
+    is a new row, not a reused one - so the history of every swap that ever
+    happened (or was proposed and declined) stays intact.
+
+    `local_weights_path` is only set once approved (that's the point at
+    which the file actually gets downloaded and stored) - null while
+    pending or if rejected, since nothing was fetched.
+    """
+
+    __tablename__ = "model_promotions"
+    __table_args__ = (
+        UniqueConstraint(
+            "dataset_view", "mlflow_model_name", "mlflow_version",
+            name="uq_model_promotions_view_model_version",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dataset_view: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    mlflow_model_name: Mapped[str] = mapped_column(String, nullable=False)
+    mlflow_version: Mapped[str] = mapped_column(String, nullable=False)
+    mlflow_run_id: Mapped[str] = mapped_column(String, nullable=False)
+    # Copied from M7's own tag at detection time, not re-derived later - a
+    # verdict is a property of that MLflow version at the moment it was
+    # found to be Production, and must read the same in this audit trail
+    # even if the golden set (and therefore what a fresh comparison would
+    # say) changes afterward.
+    promotion_recommendation: Mapped[str] = mapped_column(String, nullable=False)
+    regressed_classes: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default="pending")
+    local_weights_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
+
+    decided_by: Mapped["Annotator | None"] = relationship()

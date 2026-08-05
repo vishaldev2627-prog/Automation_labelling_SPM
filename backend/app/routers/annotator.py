@@ -3,10 +3,13 @@
 the current browser session.
 
 Also owns the "golden_curator" role (see app.models.db_models.Annotator) -
-who's allowed to verify/update the frozen golden eval set once Phase 4
-builds it. Role changes here aren't gated by anything (no real auth
-exists), same caveat as the rest of this identity system - it's groundwork
-for Phase 4's permission checks, not a security boundary today.
+who's allowed to verify/update the frozen golden eval set (M4) - and the
+"model_reviewer" role (M7.5) - who's allowed to approve or reject swapping
+which model actually serves live annotator suggestions, a deliberately
+distinct responsibility from curating the golden set. Role changes here
+aren't gated by anything (no real auth exists), same caveat as the rest of
+this identity system - it's groundwork for these permission checks, not a
+security boundary today.
 """
 from __future__ import annotations
 

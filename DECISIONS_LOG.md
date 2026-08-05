@@ -600,6 +600,63 @@ confirming nothing auto-promotes. Natural variance training the same 5 tiny imag
 some classes better and some worse is expected here - exactly the scenario this gate exists to
 surface, not paper over with an aggregate number.
 
+**M7.5 — promotion sync, discussed and scoped with the product owner before building.** M7 stopped at
+a recommendation tagged in MLflow; nothing decided whether a promotion in MLflow's UI should actually
+change what live annotators get suggestions from. The design question was genuinely open (four
+concrete sub-decisions: how the app learns a promotion happened, where the downloaded model gets
+stored, whether `detect()` can ever depend on MLflow being reachable, and who approves) and was talked
+through rather than assumed - the answer landed on **automatic detection, human-gated activation**:
+
+- **Detection is automatic.** A background poller (`app.main._start_model_promotion_poller`, one
+  daemon thread for the process, not per-session - there is exactly one meaningful answer to "what
+  does MLflow currently say") checks MLflow's current `Production` version for each of the four fixed
+  dataset views on an interval (`model_promotion_poll_interval_seconds`, default 1800s) and records a
+  `model_promotions` row the first time a given (view, model, version) is ever seen - never a
+  duplicate, never re-asked once decided.
+- **Activation is not automatic.** A brand new role, `model_reviewer` - deliberately distinct from
+  `golden_curator`, since curating what's eligible and deciding what live annotators actually run are
+  different responsibilities - must explicitly approve or reject each pending row via
+  `/api/model-promotions/{id}/approve|reject`. Approval downloads the artifact, runs a **sanity-load-
+  and-inference-once check on a synthetic probe image** before touching anything live (mirrors this
+  project's own "never end up with zero model loaded, sanity-check before flipping the pointer"
+  principle) - a broken or incompatible checkpoint raises there, before `registry.json` is touched, so
+  live serving keeps whatever was already active. Only after that check passes does it get copied into
+  the same per-view `registry.json`/`detector_v{N}.pt` structure `_run_training`'s own local-training
+  path already writes - same storage root as everything else in `models_dir`, not a separate system,
+  just clearly tagged (`source: "mlflow_promotion"`) so provenance is never ambiguous.
+- **`detect()` never talks to MLflow, anywhere in this flow.** `_ensure_model_loaded` already re-reads
+  `registry.json` on every call and swaps its in-memory model the moment the path on disk changes -
+  the exact mechanism that makes activation "take effect" for annotators, with zero new dependency on
+  MLflow being reachable on the request path. If MLflow is down, the background poller just finds
+  nothing new that cycle; annotators are entirely unaffected either way.
+- **Rollback is local and instant, not another MLflow round-trip.** Previous weights files are never
+  deleted, so reverting just re-points `registry.json` at whatever was active before the most recent
+  approval - no download, no dependency on MLflow being up at the moment something needs to be undone.
+  Deliberately not its own audited `model_promotions` row (the unique constraint is on
+  (view, model, version); re-approving the same version would collide with it) - a direct,
+  logged file-level revert instead, with a fuller audit trail as a reasonable follow-up if rollback
+  turns out to get used often enough to want one.
+
+**A real bug caught only by testing it live, not by writing it correctly on paper:** the background
+poller found nothing for its first full cycle - not because no `Production` version existed (one
+did), but because neither `check_for_new_production_version` nor `approve` ever explicitly configured
+MLflow's tracking URI before calling it. `Settings` parses `.env` into its own object and never
+exports it to `os.environ`; earlier M5 work only appeared to work by coincidence, because a training
+run happening to run first in the same process set the env var as a side effect ultralytics' own
+integration also depends on. The poller has no such lucky accident to ride on. Fixed by having every
+MLflow-touching call in this module explicitly call `mlflow.set_tracking_uri()` first
+(`_configure_mlflow`), and confirmed live: after the fix, the very next poll cycle found and proposed
+the real `Production` version.
+
+Verified live end-to-end past that fix: version 1 (already `Production` from M7's own testing) was
+found automatically, a plain annotator got a 403 attempting to approve it, promoting the identity to
+`model_reviewer` let approval succeed - downloaded, sanity-checked, activated, and `/api/detector/active`
+confirmed the swap. Separately, version 2 (tagged `regressed` by M7) was manually pushed to
+`Production` in MLflow to simulate a curator overriding the automated verdict - the app surfaced its
+exact `regressed_classes` to the reviewer, who rejected it; the active model stayed on version 1
+throughout, confirming the app-side gate is authoritative over MLflow's own stage, not a rubber stamp
+for it.
+
 Two real bugs found and fixed only because this was run for real rather than left as "should work":
 
 1. **ultralytics ships its own built-in MLflow integration**, auto-enabled the instant `mlflow` is
