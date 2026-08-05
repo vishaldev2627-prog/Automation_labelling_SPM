@@ -82,6 +82,24 @@ labeled photos already).
    photos + labels + a manifest describing exactly what's in it
       ↓
 8. That snapshot is handed off to the pipeline team to train/test models
+      ↓
+   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+   Everything below this line happens in the pipeline team's own systems,
+   not in this tool — see section 4a for what that means and why.
+   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+      ↓
+9. They train a candidate model on our snapshot
+      ↓
+10. They score that candidate against the golden set (section 5.9) — the
+    permanently frozen images nothing ever trains on
+      ↓
+11. A gate decides: does the new model match or beat the current one on
+    *every* safety-relevant part, not just on average? Fail on even one
+    such part → rejected, current model keeps running
+      ↓
+12. Pass → gradual rollout (a "shadow" or "canary" period watching the new
+    model on real traffic before fully trusting it), with the ability to
+    roll straight back to the previous model if anything looks wrong
 ```
 
 The key idea running through steps 3–7: **once something has been
@@ -91,6 +109,41 @@ even one label changes, you get a *new* package, and the old one is still
 sitting there unchanged. This matters because a model that was trained on
 "package #42" needs to be able to prove, forever, exactly what was in
 package #42.
+
+---
+
+## 4a. What happens after handoff — and why none of it is built here
+
+Steps 9–12 above are the natural next question ("ok, we labeled it — then
+what actually happens?"), so they're included for the full picture. But
+it's important to be precise about whose responsibility that is, because
+it's a deliberate, already-made decision, not an oversight:
+
+**This tool's job stops at producing a trustworthy package (step 7/8).**
+Training the actual defect-detection models, tracking those training runs,
+scoring them, deciding whether a new model is good enough to replace the
+current one, and rolling it out safely — all of that happens in the
+pipeline team's *own* tracking system (a tool called **MLflow**, think of
+it as a lab notebook that automatically records every training attempt:
+what data went in, what settings were used, how well it scored, and which
+version is currently "the one actually running in production").
+
+Early on, there was a real option on the table for *us* to run some of that
+ourselves — either by writing directly into the pipeline team's MLflow, or
+by standing up a small MLflow of our own. The pipeline team's answer settled
+it: **we package data and place it somewhere they can pick it up
+("staging"); we never write into their tracking system directly.** That's
+why the flow diagram above visually separates step 8 from what follows —
+everything past that line is a different team's infrastructure, which this
+project has no code for and no visibility into.
+
+One narrower question is still genuinely open, not decided either way: this
+tool *also* uses a small AI model internally, just to give annotators a
+head-start outline when they open a photo (the "SAM2 suggests, human
+corrects" part of step 2). Whether *that* specific internal helper model
+ever gets its own lightweight tracking has never been answered — it would
+be a much smaller, separate thing from the pipeline team's production
+models, and isn't blocking anything described in this document.
 
 ---
 
