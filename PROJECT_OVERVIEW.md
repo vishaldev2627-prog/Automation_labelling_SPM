@@ -112,38 +112,39 @@ package #42.
 
 ---
 
-## 4a. What happens after handoff — and why none of it is built here
+## 4a. What happens after handoff — two separate stories now, not one
 
 Steps 9–12 above are the natural next question ("ok, we labeled it — then
 what actually happens?"), so they're included for the full picture. But
-it's important to be precise about whose responsibility that is, because
-it's a deliberate, already-made decision, not an oversight:
+it's important to be precise about whose responsibility that is — this
+section used to describe one story ("none of it is built here"); it's now
+two, because one of them got built since.
 
-**This tool's job stops at producing a trustworthy package (step 7/8).**
-Training the actual defect-detection models, tracking those training runs,
-scoring them, deciding whether a new model is good enough to replace the
-current one, and rolling it out safely — all of that happens in the
-pipeline team's *own* tracking system (a tool called **MLflow**, think of
-it as a lab notebook that automatically records every training attempt:
-what data went in, what settings were used, how well it scored, and which
-version is currently "the one actually running in production").
+**Story A — the pipeline team's 8 production defect-detection models.
+Unchanged, still entirely their own infrastructure.** Training those
+models, tracking those runs, scoring them, deciding whether a new one is
+good enough to replace the current one, rolling it out safely — all of
+that happens in the pipeline team's *own* tracking system (a tool called
+**MLflow** — think of it as a lab notebook that automatically records every
+training attempt: what data went in, what settings were used, how well it
+scored, which version is running right now). Early on there was a real
+option for *us* to run some of that ourselves for their models too; the
+pipeline team's answer settled it — **we package data and place it
+somewhere they can pick it up ("staging"); we never write into their
+tracking system directly.** That's why the flow diagram above visually
+separates step 8 from what follows for their models — this project has no
+code for and no visibility into that side.
 
-Early on, there was a real option on the table for *us* to run some of that
-ourselves — either by writing directly into the pipeline team's MLflow, or
-by standing up a small MLflow of our own. The pipeline team's answer settled
-it: **we package data and place it somewhere they can pick it up
-("staging"); we never write into their tracking system directly.** That's
-why the flow diagram above visually separates step 8 from what follows —
-everything past that line is a different team's infrastructure, which this
-project has no code for and no visibility into.
-
-One narrower question is still genuinely open, not decided either way: this
-tool *also* uses a small AI model internally, just to give annotators a
-head-start outline when they open a photo (the "SAM2 suggests, human
-corrects" part of step 2). Whether *that* specific internal helper model
-ever gets its own lightweight tracking has never been answered — it would
-be a much smaller, separate thing from the pipeline team's production
-models, and isn't blocking anything described in this document.
+**Story B — the small internal helper AI. This one, we do now track,
+end to end.** Separately from the pipeline team's models, this tool uses
+its *own* small AI model internally, just to give annotators a head-start
+outline when they open a photo (the "SAM2 suggests, human corrects" part
+of step 2). That question — should *this* helper get its own tracking —
+used to be open. It's answered now: yes, and the whole loop is built. See
+section 5.11 onward for what that actually does. The two systems remain
+completely separate: this tool has its own small MLflow instance, tracking
+only its own helper model, never touching or writing into the pipeline
+team's one.
 
 ---
 
@@ -255,20 +256,26 @@ not just hoped for. If, despite that, a violation were ever somehow
 detected, the export refuses to complete rather than shipping a
 compromised package.
 
-### 5.9 "A permanent, untouchable ruler to grade models against"
+### 5.9 "A permanent, untouchable ruler to grade models against" — now actually built and filled
 
-Beyond the ordinary held-out test data, there's a plan for a small,
-hand-picked **golden set** — images a trusted "curator" selects specifically
-to *evaluate* finished models, forever separate from anything a model ever
-trains on.
+Beyond the ordinary held-out test data, there's a small, hand-picked
+**golden set** — images set aside specifically to *evaluate* finished
+models, forever separate from anything a model ever trains on.
 
-What's built: only a designated curator can create or add to a golden set
-(anyone else is rejected outright); once an image is added, it's
-permanently excluded from every future training export, and automated
-processes (like the label auto-copying in 5.4) are blocked from ever
-touching a golden image. What's *not* built yet: nobody has actually
-picked which images go in it — that needs a real domain expert to sit down
-and choose, and no one's been assigned that job yet.
+Only a designated curator can create or add to a golden set (anyone else
+is rejected outright); once an image is added, it's permanently excluded
+from every future training export, and automated processes (like the label
+auto-copying in 5.4) are blocked from ever touching a golden image.
+
+**Update: it's populated now, not just built.** The original plan was to
+wait for a named domain expert to hand-pick images from scratch — nobody
+had been assigned that job. Instead, the decision was made to use the
+existing ~2000-image `side_view` dataset as the source, since it's already
+verified and accurate: 200 images were automatically selected to cover
+every component type (with the safety-critical ones guaranteed coverage
+first), and a curator committed them as the actual golden set for that
+view. The other three views (underbelly, wheel-shelling, buffer) don't have
+one yet — same as before, they need real footage and review first.
 
 ### 5.10 "Wheel photos need to be 'unrolled' before a model can use them"
 
@@ -284,12 +291,94 @@ probably be corrected later — if we baked it into every drawn label now,
 correcting it later would mean redoing every wheel by hand. Instead,
 correcting it later just means re-running the export.
 
+### 5.11 "Actually track the internal helper's own training" (new)
+
+Recall from 4a: this tool has its own small internal AI (SAM2 + a
+lightweight detector) that suggests outlines to annotators — completely
+separate from the pipeline team's 8 production models. Training a fresh
+version of that helper used to just produce a file, with no record of what
+was tried, what data it used, or how it did — anyone wanting to know had
+to eyeball scattered log lines.
+
+Now it's tracked in a lab notebook of its own (a small MLflow instance,
+just for this helper — never the pipeline team's). Every training attempt
+records: which settings were used, what happened each round of training,
+and all the usual result charts (accuracy curves, a confusion matrix,
+example predictions) — none of that used to be kept at all; it was
+generated and immediately thrown away.
+
+**And it now starts itself automatically.** Every time a snapshot is
+handed off (step 8), a fresh training attempt for the helper kicks off on
+its own — nobody has to remember to click a button.
+
+### 5.12 "Score the newly trained helper against the golden ruler" (new)
+
+Training the helper used to stop at "did it finish." Now, right after
+training, the resulting model is automatically tested against the golden
+set from 5.9 — the same permanently frozen ruler nothing ever trains on —
+and the score for *every single component type* is recorded, not just one
+overall number. That distinction matters: an overall score can look great
+while one specific, safety-relevant part quietly gets worse — recording
+every part's score separately is what stops that from hiding.
+
+### 5.13 "Deciding whether a new helper version is actually better" (new)
+
+Once a version is scored, it's logged as a numbered candidate. The tool
+then automatically compares it — part by part — against whichever version
+is currently marked as "the good one," and tags it with a plain verdict:
+*nothing to compare against yet*, *matches or beats the current one on
+every part*, or *got worse on these specific parts: ...*.
+
+**Nobody's suggestions change because of this comparison alone.** Marking
+a version as "the good one" always happens by a human's own deliberate
+action, and even that isn't the final word — see 5.14.
+
+### 5.14 "Two people, two separate green lights, before anything live changes" (new)
+
+This is the safety net around 5.13, and it was deliberately designed this
+way rather than made automatic:
+
+1. Someone reviews a candidate's part-by-part scores and marks it "the
+   good one" — a judgment about whether the model is actually accurate.
+2. **A second, different person** then has to separately approve *actually
+   swapping* what live annotators get their suggestions from. This is a
+   judgment about whether it's *safe* to make that swap right now — a
+   deliberately different question from step 1, and the tool won't let one
+   person's identity stand in for both.
+3. Only once that second person approves does the tool download the new
+   version, quietly test-run it once to make sure it actually works, and
+   *then* switch it in — never the other way around, so a broken version
+   can never end up live with nothing working at all.
+4. If the new version needs to be undone later, that's instant and doesn't
+   depend on anything else being reachable — the previous working version
+   is always kept on hand.
+
+The tool checks for a new "good one" on its own, automatically, on a
+schedule — the only manual step in this entire chain is that second
+person's yes/no. And whatever happens in this whole loop, an annotator
+opening a photo is never affected by it — suggestions keep coming from
+whichever version was last actually approved, instantly, with nothing to
+wait on.
+
+### 5.15 "Never let training crowd out a working annotator" (new)
+
+The internal helper's training uses the same graphics hardware the
+suggestion feature itself runs on. Training a new version used to have no
+awareness of this — it could start at any moment and slow down or stall
+suggestions for someone actively working on a photo.
+
+Now, before a training attempt is allowed to actually start the heavy part
+of the work, it checks whether the suggestion feature is currently busy,
+and if so, it waits — checking back periodically — until things go quiet
+before proceeding. Suggestions for a working annotator always win.
+
 ---
 
 ## 6. What's genuinely still left, and why it's not done yet
 
-Everything above is implemented and tested. Two things remain, and neither
-is a coding gap — both are blocked on something outside this codebase:
+Everything above is implemented and tested. What remains is either
+blocked on something outside this codebase, or a deliberate, separate
+decision not yet made:
 
 ### 6.1 Fixing how one internal ID is stored
 
@@ -305,12 +394,12 @@ database taken first (see the pg_dump explanation in the previous message)
 — that has to happen on the real production server, which is outside what
 we can do from here.
 
-### 6.2 Actually populating the golden set
+### 6.2 Golden set: done for one view, still needed for three
 
-The mechanism (section 5.9) is built and locked down. What's missing is a
-person: someone with real domain expertise needs to go through the data and
-pick which images belong in the permanent evaluation set. Nobody has been
-named for that job yet — it's a staffing decision, not an engineering one.
+`side_view`'s golden set is populated now (section 5.9). `underbelly`,
+`wheel_shelling`, and `buffer` still don't have one — not blocked on
+engineering, just on those views not having enough real, reviewed footage
+yet to draw a trustworthy set from.
 
 ### 6.3 One open question, not blocking anything
 
@@ -318,6 +407,17 @@ We're waiting on the pipeline team to confirm the exact list of 13
 "condition" values (section 5.2) is still current, and to be aware that the
 ~2000 already-labeled photos won't count toward that particular training
 set until someone assesses their condition by hand.
+
+### 6.4 The whole MLflow/training loop (5.11–5.15) is the newest, least-proven piece
+
+It's fully built and has been tested for real — including deliberately
+triggering the exact situations it's meant to handle safely (an approval
+being rejected, training being made to wait for a busy moment) rather than
+just checking that it runs without crashing. But it's also the piece with
+the most direct effect on what annotators actually see if something in it
+were ever wrong, and it's only ever been run in the local development
+copy. Turning it on in the live, currently running version of the tool is
+a deliberate, separate decision still to be made — see 7 below.
 
 ---
 
