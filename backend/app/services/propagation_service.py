@@ -18,7 +18,9 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from app.config import Settings
+from app.db import SessionLocal
 from app.models.schemas import AnnotationObject, ImageAnnotations, ObjectSource, ObjectStatus
+from app.services import golden_repo
 from app.services.dataset_service import DatasetNotFoundError, DatasetService, ImageNotFoundError
 from app.services.mask_generation_service import MaskGenerationService
 from app.services.similarity_service import SimilarityService
@@ -97,6 +99,17 @@ class PropagationService:
     def _propagate_to(self, source_id: str, seed_objects: list[AnnotationObject], target_id: str) -> None:
         if target_id == source_id:
             return
+        # M4: a golden image is the ruler nothing trains on - it must never
+        # be silently overwritten by an automation, propagation included.
+        # Checked before _is_untouched so a golden image that also happens
+        # to be otherwise untouched is still refused, not just deprioritized.
+        db = SessionLocal()
+        try:
+            if golden_repo.is_golden_image(db, self._ds.dataset_key, target_id):
+                logger.info("Propagation into %s refused: image is in the golden eval set", target_id)
+                return
+        finally:
+            db.close()
         target = self._ds.get_annotations(target_id)
         if not _is_untouched(target):
             return

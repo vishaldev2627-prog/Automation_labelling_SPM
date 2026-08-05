@@ -64,6 +64,28 @@ class Settings(BaseSettings):
     # new version rather than silently altering what past snapshots meant.
     exclude_classes: str = "leakage"
 
+    # Wheel log-polar unwrap (W-5, D-Q5). PROVISIONAL / ENGINEERING PLACEHOLDER,
+    # NOT CERTIFIED - "wheel specs are to be considered in your own accord for
+    # now" (pipeline team). Deliberately NOT a wheel diameter in mm: converting
+    # a real-world diameter to a pixel radius needs camera calibration, which
+    # does not exist yet (stitcher/homography prerequisites are still open,
+    # FINAL_AIML_ARCHITECTURE §16). Unlike pipeline.md §5.5's own production
+    # method ("circle seeded from fixed geometry + known diameter, not blind
+    # Hough" - for raw camera frames with no human in the loop), this export
+    # tool derives the circle per-image from the annotated `wheel_class_name`
+    # object's own bbox instead - grounded in that frame's actual annotation
+    # rather than a fixed pixel constant that would be wrong the moment camera
+    # distance/zoom varies between frames. These settings only control padding
+    # and output resolution, not wheel geometry itself - see D-Q5's Consequence
+    # C-4 for why they must stay swappable without invalidating annotations:
+    # they are never baked into a raw-space mask, only applied at export time.
+    wheel_unwrap_version: int = 1
+    wheel_class_name: str = "wheel"
+    wheel_unwrap_radius_padding_pct: float = 5.0
+    wheel_unwrap_output_width: int = 512
+    wheel_unwrap_output_height: int = 128
+    wheel_unwrap_log_scale: bool = True
+
     # Object store for publishing dataset snapshots (M2). Points at the
     # `automation-minio-1` service in docker-compose by default. Publishing is
     # opt-in per export and never fails an export - the local snapshot is the
@@ -76,6 +98,17 @@ class Settings(BaseSettings):
     s3_bucket: str = "vb-dataset-snapshots"
     s3_prefix: str = "snapshots"
     s3_region: str = "us-east-1"
+
+    # Golden eval set storage (M4). A **separate bucket** from s3_bucket above,
+    # not a prefix under it - D-Q4 / annotation_module_build_plan.md Q-C are
+    # explicit that this needs to be structurally separate storage, not a flag
+    # on shared storage, because the only mitigation that counts against
+    # contamination is that no propagation, triage, or export path can write
+    # here. Same endpoint/credentials as the snapshot store (same MinIO
+    # instance) - it's the bucket boundary that matters, not a separate
+    # connection.
+    golden_s3_bucket: str = "vb-golden-eval-set"
+    golden_s3_prefix: str = "golden"
 
     # Logging
     log_level: str = "INFO"

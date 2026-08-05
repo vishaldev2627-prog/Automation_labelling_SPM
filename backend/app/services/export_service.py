@@ -18,7 +18,7 @@ from app.models.schemas import (
     ObjectStatus,
 )
 from app.services import annotation_state_repo as state_repo
-from app.services import object_store, review_service, snapshot_repo, snapshot_service
+from app.services import golden_repo, object_store, review_service, snapshot_repo, snapshot_service
 from app.services.dataset_service import DatasetService
 from app.services.polygon_service import polygon_to_mask
 from app.session_context import get_current_annotator
@@ -27,6 +27,14 @@ from app.utils.yolo_utils import write_segmentation_label_file
 logger = logging.getLogger(__name__)
 
 VAL_SPLIT = 0.1
+
+
+class SplitIntegrityViolation(Exception):
+    """Raised when a snapshot would ship pseudo/synthetic or auto-accepted
+    labels outside train, despite M3's forcing pass. Should never trigger in
+    practice - _write_dataset forces those images into train before this is
+    ever checked - but a snapshot is an immutable, MLflow-tracked handoff, so
+    this is a hard refusal rather than a logged warning if it somehow does."""
 
 
 class ExportService:
@@ -41,6 +49,28 @@ class ExportService:
         digest = hashlib.md5(image_id.encode("utf-8")).hexdigest()
         bucket = int(digest, 16) % 100
         return "val" if bucket < VAL_SPLIT * 100 else "train"
+
+    @staticmethod
+    def _enforce_split_integrity(
+        natural_split: str, propagated_here: int, is_auto_accepted: bool
+    ) -> tuple[str, bool]:
+        """M3: pseudo/synthetic (propagated) and auto-accepted labels must
+        never land in val/test (pipeline.md's retrain rule, via
+        FINAL_AIML §12: "pseudo/synthetic -> train split only, never
+        valid/test"). Returns the (possibly overridden) split and whether an
+        override happened, so the caller can log it loudly - a re-split
+        changes what a previously-exported split assignment meant for that
+        image, and that must never happen silently.
+
+        Pulled out as its own pure function - deliberately independent of
+        DatasetService/Postgres - so the enforcement rule itself is directly
+        testable without standing up either.
+        """
+        if natural_split == "train":
+            return natural_split, False
+        if propagated_here > 0 or is_auto_accepted:
+            return "train", True
+        return natural_split, False
 
     def _write_condition_crops(
         self, out_dir: Path, image_id: str, annotations: ImageAnnotations, margin_pct: float
@@ -112,6 +142,40 @@ class ExportService:
             written += 1
         return written
 
+    def _fine_structure_masks_by_class(self, annotations: ImageAnnotations) -> dict[int, np.ndarray]:
+        """Rasterize every `fine_structure` class present in this image into
+        one unioned 0/1 mask per class id, at native resolution. Shared by
+        `_write_fine_structure_masks` (W-3) and `_write_wheel_unwraps` (W-5) -
+        both need the same per-class raster, just written to different
+        places (a raw-space PNG vs. the input to the log-polar transform).
+
+        One mask per (image, class), not per object: the pipeline trains
+        segmentation per class, and two cracks on one frame are the same
+        class. Pieces are unioned via OR-accumulation rather than one
+        fillPoly call with all pieces, since a single call would treat them
+        as one path and overlapping pieces would cancel out under the
+        even-odd rule.
+        """
+        import numpy as np
+
+        by_class: dict[int, list[list]] = {}
+        for obj in annotations.objects:
+            if obj.status == ObjectStatus.REJECTED:
+                continue
+            if not self._ds.is_fine_structure(obj.class_id):
+                continue
+            for piece in [obj.polygon, *obj.extra_polygons]:
+                if len(piece) >= 3:
+                    by_class.setdefault(obj.class_id, []).append(piece)
+
+        masks: dict[int, np.ndarray] = {}
+        for class_id, pieces in by_class.items():
+            mask = np.zeros((annotations.height, annotations.width), dtype=np.uint8)
+            for piece in pieces:
+                mask |= polygon_to_mask(piece, annotations.width, annotations.height).astype(np.uint8)
+            masks[class_id] = mask
+        return masks
+
     def _write_fine_structure_masks(
         self, out_dir: Path, image_id: str, annotations: ImageAnnotations
     ) -> int:
@@ -125,36 +189,16 @@ class ExportService:
         it cannot express a hole, and a closed ring around a hairline crack
         encodes its outline rather than its extent. The raster is the faithful
         artifact; the polygon stays for the tooling that expects YOLO-seg text.
-
-        One file per (image, class), not per object: the pipeline trains
-        segmentation per class, and two cracks on one frame are the same class.
-        Pieces are unioned.
         """
-        by_class: dict[int, list[list]] = {}
-        for obj in annotations.objects:
-            if obj.status == ObjectStatus.REJECTED:
-                continue
-            if not self._ds.is_fine_structure(obj.class_id):
-                continue
-            for piece in [obj.polygon, *obj.extra_polygons]:
-                if len(piece) >= 3:
-                    by_class.setdefault(obj.class_id, []).append(piece)
-
+        by_class = self._fine_structure_masks_by_class(annotations)
         if not by_class:
             return 0
 
         import cv2
-        import numpy as np
 
         out_dir.mkdir(parents=True, exist_ok=True)
         written = 0
-        for class_id, pieces in by_class.items():
-            mask = np.zeros((annotations.height, annotations.width), dtype=np.uint8)
-            for piece in pieces:
-                # OR-accumulate rather than one fillPoly call with all pieces:
-                # a single call treats them as one path, and overlapping pieces
-                # would cancel out under the even-odd rule.
-                mask |= polygon_to_mask(piece, annotations.width, annotations.height).astype(np.uint8)
+        for class_id, mask in by_class.items():
             # 0/255 rather than 0/1 so the PNG is viewable by a human checking
             # it, and still loads as a binary mask after a >0 threshold.
             path = out_dir / f"{image_id}__class{class_id}.png"
@@ -163,6 +207,70 @@ class ExportService:
                 continue
             written += 1
         return written
+
+    def _write_wheel_unwraps(self, out_dir: Path, image_id: str, annotations: ImageAnnotations) -> int:
+        """Generate the log-polar unwrap for one wheel image, from raw-space
+        masks + current (provisional) unwrap parameters (W-5, D-Q5).
+
+        Writes `<out_dir>/images/<image_id>.png` (the unwrapped strip cut
+        from the raw frame) and one `<out_dir>/masks/<image_id>__class{id}.png`
+        per fine_structure class present - mirroring `_write_fine_structure_masks`'s
+        raw-space layout, just unwrapped. Returns 1 if an unwrap was written,
+        0 if skipped (no annotated wheel object, or no fine_structure content
+        to unwrap - an unwrap with nothing on it isn't useful training data).
+
+        Deliberately re-derives the circle from this image's own annotations
+        every export rather than caching it anywhere: the whole point of W-5
+        is that the transform is regenerated from raw ground truth each time,
+        so a config change (or a corrected wheel-class annotation) takes
+        effect on the very next export with nothing to invalidate.
+        """
+        import cv2
+        import numpy as np
+
+        from app.services import log_polar_service
+        from app.utils.image_utils import read_image_bgr
+
+        settings = get_settings()
+        circle = log_polar_service.find_wheel_circle(
+            annotations.objects,
+            annotations.width,
+            annotations.height,
+            settings.wheel_class_name,
+            settings.wheel_unwrap_radius_padding_pct,
+        )
+        if circle is None:
+            return 0
+
+        fine_structure_masks = self._fine_structure_masks_by_class(annotations)
+        if not fine_structure_masks:
+            return 0
+
+        try:
+            image = read_image_bgr(self._ds.get_image_path(image_id))
+        except Exception:
+            logger.exception("Could not read %s for wheel unwrap; skipping", image_id)
+            return 0
+
+        out_width = settings.wheel_unwrap_output_width
+        out_height = settings.wheel_unwrap_output_height
+        log_scale = settings.wheel_unwrap_log_scale
+
+        images_dir = out_dir / "images"
+        masks_dir = out_dir / "masks"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        masks_dir.mkdir(parents=True, exist_ok=True)
+
+        unwrapped_image = log_polar_service.unwrap_log_polar(image, circle, out_width, out_height, log_scale)
+        cv2.imwrite(str(images_dir / f"{image_id}.png"), unwrapped_image)
+
+        for class_id, mask in fine_structure_masks.items():
+            unwrapped_mask = log_polar_service.unwrap_log_polar(
+                mask.astype(np.uint8) * 255, circle, out_width, out_height, log_scale
+            )
+            cv2.imwrite(str(masks_dir / f"{image_id}__class{class_id}.png"), unwrapped_mask)
+
+        return 1
 
     def export(self, request: ExportRequest) -> dict:
         """Write a dataset, as an immutable content-addressed snapshot by default.
@@ -197,6 +305,18 @@ class ExportService:
 
     def _finalize_snapshot(self, request: ExportRequest, staging: Path, stats: dict) -> dict:
         settings = get_settings()
+
+        # M3: a snapshot is the immutable, MLflow-tracked handoff artifact - it
+        # must never claim a split-integrity compliance it does not have.
+        # _write_dataset already forces propagated/auto-accepted images into
+        # train, so this should always be a no-op; it is a hard refusal rather
+        # than the warning-only path M2 shipped with, in case that forcing pass
+        # is ever bypassed or a future violation type isn't force-corrected.
+        if not stats.get("split_integrity_ok", True):
+            raise SplitIntegrityViolation(
+                f"Refusing to finalize snapshot: split-integrity violations "
+                f"{stats.get('split_integrity')}"
+            )
 
         file_index = snapshot_service.build_file_index(staging)
         snapshot_id = snapshot_service.compute_snapshot_id(file_index, self._ds.class_map_hash)
@@ -269,13 +389,6 @@ class ExportService:
                 "class_map_hash": self._ds.class_map_hash,
             }
         )
-        if not stats.get("split_integrity_ok", True):
-            logger.warning(
-                "Snapshot %s has split-integrity violations (%s). M3 turns this into a refusal; "
-                "for now it is recorded in the manifest, not blocked.",
-                snapshot_id,
-                stats.get("split_integrity"),
-            )
         return stats
 
     def _write_dataset(self, request: ExportRequest, exports_dir: Path) -> dict:
@@ -327,6 +440,13 @@ class ExportService:
                 db, self._ds.dataset_key, "auto_accept"
             )
             annotator_ids = state_repo.get_updated_by_ids(db, self._ds.dataset_key, image_ids)
+            # M4: every image_id ever frozen into a golden set for this view,
+            # across all versions - the ruler nothing trains on. Excluded
+            # entirely below, not just kept out of val/test like M3's
+            # propagated/auto-accepted forcing: a golden image belongs in
+            # neither train nor val of a training export.
+            golden_ids = golden_repo.get_golden_image_ids(db, self._ds.dataset_key)
+            golden_set_storage_exists = bool(golden_repo.list_versions(db, self._ds.dataset_key))
         finally:
             db.close()
 
@@ -345,13 +465,26 @@ class ExportService:
         per_class_counts: dict[str, dict[int, int]] = {}
         split_counts: dict[str, dict[str, int]] = {}
         integrity = {
+            # M3: enforced, not just measured - _split_for's natural assignment
+            # is overridden below whenever it would land pseudo/synthetic
+            # (propagated) or auto-accepted labels outside train, so these two
+            # counts should always land at 0. Kept rather than removed: a
+            # nonzero value here is now a bug signal, and _finalize_snapshot
+            # refuses to finalize a snapshot that reports one.
             "pseudo_synthetic_in_val_or_test": 0,
             "auto_accepted_in_val_or_test": 0,
-            # No golden-set storage exists yet (M4), so nothing can be in a split
-            # from it. Reported as 0 with this note rather than omitted, so the
-            # field does not silently appear later and look like a regression.
+            # How many images the M3 forcing pass actually redirected into
+            # train against their natural hash-based split - the visible
+            # record that enforcement did something, as opposed to reporting
+            # 0/0 above because there was nothing to enforce.
+            "pseudo_synthetic_forced_to_train": 0,
+            "auto_accepted_forced_to_train": 0,
+            # M4: golden images are dropped from `exportable` entirely below
+            # (see golden_images_excluded in the returned stats), so this
+            # should always land at 0 too - kept as the same kind of bug
+            # signal as the two counters above, not a measurement.
             "golden_ids_in_any_split": 0,
-            "golden_set_storage_exists": False,
+            "golden_set_storage_exists": golden_set_storage_exists,
         }
         spine = {
             "fields": [
@@ -375,7 +508,16 @@ class ExportService:
         skipped = 0
         needs_review = 0
         negatives = 0
+        golden_images_excluded = 0
         for image_id in image_ids:
+            # M4: a golden image never appears in a training export, in any
+            # split, regardless of review/completion state - it is excluded
+            # before any of those checks even run, not just kept out of
+            # val/test the way M3's forced images are.
+            if image_id in golden_ids:
+                golden_images_excluded += 1
+                continue
+
             annotations = self._ds.get_annotations(image_id)
             if request.only_completed and not annotations.completed:
                 skipped += 1
@@ -427,11 +569,30 @@ class ExportService:
 
         exported = 0
         mask_files = 0
+        wheel_unwraps = 0
         condition_crops = 0
         condition_unassessed = 0
         crop_margin_pct = settings.condition_crop_margin_pct
         for image_id, objects, annotations in exportable:
-            split = "train" if force_train else self._split_for(image_id)
+            live = [o for o in annotations.objects if o.status != ObjectStatus.REJECTED]
+            propagated_here = sum(1 for o in live if o.source == ObjectSource.PROPAGATED)
+            is_auto_accepted = image_id in auto_accepted_ids
+
+            natural_split = "train" if force_train else self._split_for(image_id)
+            split, forced_to_train = self._enforce_split_integrity(
+                natural_split, propagated_here, is_auto_accepted
+            )
+            if forced_to_train:
+                logger.warning(
+                    "M3 split-integrity: forcing %s into train (natural split was "
+                    "%s) - %d propagated label(s), auto_accepted=%s",
+                    image_id, natural_split, propagated_here, is_auto_accepted,
+                )
+                if propagated_here:
+                    integrity["pseudo_synthetic_forced_to_train"] += propagated_here
+                if is_auto_accepted:
+                    integrity["auto_accepted_forced_to_train"] += 1
+
             out_images = exports_dir / "images" / split
             out_labels = exports_dir / "labels" / split
             out_images.mkdir(parents=True, exist_ok=True)
@@ -447,6 +608,9 @@ class ExportService:
 
             mask_files += self._write_fine_structure_masks(
                 exports_dir / "masks" / split, image_id, annotations
+            )
+            wheel_unwraps += self._write_wheel_unwraps(
+                exports_dir / "logpolar" / split, image_id, annotations
             )
             if request.include_condition_crops:
                 condition_crops += self._write_condition_crops(
@@ -466,11 +630,8 @@ class ExportService:
             bucket["images"] += 1
             bucket["labels"] += len(objects)
 
-            live = [o for o in annotations.objects if o.status != ObjectStatus.REJECTED]
-            propagated_here = sum(1 for o in live if o.source == ObjectSource.PROPAGATED)
             provenance["propagated_labels"] += propagated_here
 
-            is_auto_accepted = image_id in auto_accepted_ids
             if is_auto_accepted:
                 provenance["auto_accepted_images"] += 1
             else:
@@ -493,12 +654,10 @@ class ExportService:
             else:
                 spine["frames_missing_stamp"] += 1
 
-            # Split integrity: pseudo/synthetic (propagated) and auto-accepted
-            # labels must stay in train only (pipeline.md's retrain rule, via
-            # FINAL_AIML §12: "pseudo/synthetic -> train split only, never
-            # valid/test"). M3 enforces this by forcing such images into train;
-            # M2 measures it honestly so the manifest cannot claim a compliance
-            # it does not have.
+            # Should be unreachable: the forcing pass above already redirects
+            # any propagated/auto-accepted image into train. Left as a
+            # defensive check rather than removed - if it ever fires, that is
+            # exactly the case _finalize_snapshot's refusal exists to catch.
             if split != "train":
                 if propagated_here:
                     integrity["pseudo_synthetic_in_val_or_test"] += propagated_here
@@ -541,14 +700,16 @@ class ExportService:
 
         logger.info(
             "Export complete: %d exported (%d confirmed negatives), %d skipped, %d needs_review, "
-            "%d fine-structure mask raster(s), %d condition crop(s) "
-            "(%d object(s) still unassessed), %d excluded label(s) dropped, "
+            "%d golden image(s) excluded, %d fine-structure mask raster(s), %d wheel unwrap(s), "
+            "%d condition crop(s) (%d object(s) still unassessed), %d excluded label(s) dropped, "
             "class-map version %s",
             exported,
             negatives,
             skipped,
             needs_review,
+            golden_images_excluded,
             mask_files,
+            wheel_unwraps,
             condition_crops,
             condition_unassessed,
             excluded_labels,
@@ -565,9 +726,27 @@ class ExportService:
             "skipped": skipped,
             "needs_review": needs_review,
             "mask_rasters": mask_files,
+            "wheel_unwraps": wheel_unwraps,
+            # Versioned per snapshot (D-Q5's Consequence C-4): a mask drawn in
+            # raw space is meaningless under different unwrap parameters, so
+            # the manifest must record exactly which ones produced this
+            # export's logpolar/ files. `certified: False` is load-bearing,
+            # not decoration - these are provisional engineering placeholders
+            # ("wheel specs are to be considered in your own accord for now"),
+            # never a claim that this diameter/geometry is correct.
+            "wheel_unwrap_params": {
+                "version": settings.wheel_unwrap_version,
+                "certified": False,
+                "wheel_class_name": settings.wheel_class_name,
+                "radius_padding_pct": settings.wheel_unwrap_radius_padding_pct,
+                "output_width": settings.wheel_unwrap_output_width,
+                "output_height": settings.wheel_unwrap_output_height,
+                "log_scale": settings.wheel_unwrap_log_scale,
+            },
             "condition_crops": condition_crops,
             "condition_unassessed": condition_unassessed,
             "excluded_labels_dropped": excluded_labels,
+            "golden_images_excluded": golden_images_excluded,
             # What this export's class ids actually mean. The number is for
             # humans; the hash is what proves two exports used the same map.
             "class_map_version": self._ds.class_map_version,

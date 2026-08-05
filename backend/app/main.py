@@ -15,6 +15,7 @@ from app.routers import (
     dataset,
     detector,
     export,
+    golden,
     images,
     masks,
     progress,
@@ -73,6 +74,7 @@ app.include_router(similarity.router)
 app.include_router(triage.router)
 app.include_router(review.router)
 app.include_router(auto_accept.router)
+app.include_router(golden.router)
 
 
 @app.on_event("startup")

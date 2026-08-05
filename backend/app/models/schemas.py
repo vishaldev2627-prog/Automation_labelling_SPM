@@ -496,3 +496,35 @@ class SimilarityIndexStatus(BaseModel):
     started_at: float
     updated_at: float
     indexed_images: int = 0
+
+
+class CreateGoldenSetRequest(BaseModel):
+    # No dataset_view field: unlike ExportRequest, this always targets
+    # whichever dataset the caller currently has loaded, the same way
+    # export.py derives self._ds.dataset_key server-side rather than
+    # trusting a client-supplied identifier. dataset_key is a resolved
+    # absolute filesystem path (see DatasetService), not the short view name
+    # ("side_view") a client would naturally type here - accepting it as
+    # free text invites exactly the silent-mismatch bug this avoids.
+    description: Optional[str] = None
+
+
+class AddGoldenItemsRequest(BaseModel):
+    image_ids: list[str]
+
+
+class GoldenSetInfo(BaseModel):
+    id: int
+    dataset_view: str
+    version: int
+    description: Optional[str] = None
+    created_at: datetime
+    created_by: Optional[str] = None
+    item_count: int = 0
+
+
+class GoldenItemResult(BaseModel):
+    image_id: str
+    added: bool
+    frozen: bool
+    error: Optional[str] = None

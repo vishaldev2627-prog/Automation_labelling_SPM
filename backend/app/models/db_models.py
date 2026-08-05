@@ -271,3 +271,67 @@ class DatasetClass(Base):
     color: Mapped[str] = mapped_column(String, nullable=False)
     safety_critical: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     fine_structure: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+
+
+class GoldenSet(Base):
+    """One curated, versioned golden eval set (M4, D-Q4: "frozen per-class
+    golden set, gating before the shadow canary").
+
+    Append-only, like ClassMapVersion: a curation round never edits an
+    existing version's items, it mints a new one. "We curate and version;
+    they run the eval" (D-Q4) means a version must stay byte-identical once
+    created, or a re-run of the pipeline team's gate against "the same"
+    version would silently be scoring something else.
+
+    `dataset_view` + `version` gives per-view monotonic numbering, mirroring
+    class_map_versions. There is deliberately no `frozen_at`/"draft" state -
+    a version's items are written by `golden_service.add_items` at creation
+    and the row exists once they're recorded; nothing later mutates it.
+    """
+
+    __tablename__ = "golden_sets"
+    __table_args__ = (UniqueConstraint("dataset_view", "version", name="uq_golden_sets_view_version"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dataset_view: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
+
+    created_by: Mapped["Annotator | None"] = relationship()
+
+
+class GoldenSetItem(Base):
+    """One image frozen into a golden set version (M4).
+
+    `image_id` is intentionally **not** unique per dataset_view across
+    versions - the same image can appear in more than one curation round (a
+    later version re-curating the same frame is a legitimate, if unusual,
+    edit path since versions are immutable once written). What every export
+    path actually needs is "has this image_id ever been made golden for this
+    view, in any version" - see golden_repo.get_golden_image_ids, which reads
+    across all versions on purpose so a golden image excluded under an old
+    version doesn't quietly become exportable again just because a newer
+    version exists.
+
+    `frozen_object_store_key` records where this item's image+label bytes
+    landed in the separate golden bucket (see app/services/object_store.py's
+    golden functions) - null if that upload failed, since freezing to object
+    storage is best-effort/retryable like snapshot publishing (M2) and must
+    not block the DB record, which is the source of truth for export
+    exclusion regardless of whether the bytes made it to the bucket yet.
+    """
+
+    __tablename__ = "golden_set_items"
+    __table_args__ = (
+        UniqueConstraint("golden_set_id", "image_id", name="uq_golden_set_items_set_image"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    golden_set_id: Mapped[int] = mapped_column(ForeignKey("golden_sets.id"), nullable=False, index=True)
+    image_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    frozen_object_store_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    golden_set: Mapped["GoldenSet"] = relationship()

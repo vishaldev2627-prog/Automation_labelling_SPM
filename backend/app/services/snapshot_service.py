@@ -176,12 +176,20 @@ def build_manifest(
         "provenance": stats.get("provenance", {}),
         "per_class_counts": stats.get("per_class_counts", {}),
         "spine_stamp_coverage": stats.get("spine_stamp_coverage", {}),
+        # W-5: which provisional unwrap parameters produced this snapshot's
+        # logpolar/ files, if any were written - see export_service's
+        # `wheel_unwrap_params` for why `certified` is load-bearing, not
+        # decoration. Present (with wheel_unwraps: 0) even for views that
+        # never produce an unwrap, same "0 reads as legible, not broken" the
+        # condition-crop counters already establish.
+        "wheel_unwrap": stats.get("wheel_unwrap_params", {}),
         "counts": {
             "files": len(file_index),
             "total_bytes": total_bytes,
             "images": stats.get("exported", 0),
             "confirmed_negatives": stats.get("negatives", 0),
             "mask_rasters": stats.get("mask_rasters", 0),
+            "wheel_unwraps": stats.get("wheel_unwraps", 0),
             "condition_crops": stats.get("condition_crops", 0),
             "excluded_labels_dropped": stats.get("excluded_labels_dropped", 0),
         },
@@ -189,6 +197,7 @@ def build_manifest(
             "images": "images/",
             "labels": "labels/",
             "masks": "masks/",
+            "logpolar": "logpolar/",
             "crops": "crops/",
             "checksums": CHECKSUMS_NAME,
         },

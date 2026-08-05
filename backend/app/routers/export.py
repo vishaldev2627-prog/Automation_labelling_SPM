@@ -17,7 +17,7 @@ from app.db import SessionLocal
 from app.models.schemas import ExportRequest, SnapshotInfo
 from app.services import object_store, snapshot_repo
 from app.services.dataset_service import DatasetNotFoundError, get_dataset_service
-from app.services.export_service import ExportService
+from app.services.export_service import ExportService, SplitIntegrityViolation
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/export", tags=["export"])
@@ -33,7 +33,10 @@ def export_dataset(request: ExportRequest) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     service = ExportService(ds, settings.exports_dir)
-    return service.export(request)
+    try:
+        return service.export(request)
+    except SplitIntegrityViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/snapshots", response_model=list[SnapshotInfo])

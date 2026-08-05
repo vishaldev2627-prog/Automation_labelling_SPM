@@ -132,6 +132,70 @@ def publish_snapshot(settings: Settings, snapshot_dir: Path, snapshot_id: str) -
     return PublishResult(published=True, uploaded_files=uploaded, bucket=bucket, prefix=key_root)
 
 
+def freeze_golden_item(
+    settings: Settings,
+    *,
+    dataset_view: str,
+    version: int,
+    image_id: str,
+    image_path: Path,
+    label_text: str,
+) -> PublishResult:
+    """Upload one golden-set item's image + label bytes to the **separate**
+    golden bucket (M4), under `<golden_prefix>/<dataset_view>/v<version>/`.
+
+    Deliberately its own bucket (settings.golden_s3_bucket), not a prefix
+    under settings.s3_bucket - D-Q4 / build plan Q-C require structurally
+    separate storage, because the only contamination mitigation that counts
+    is that no export/propagation/triage path can write here at all. A
+    shared bucket with a "golden/" prefix would still be one IAM boundary an
+    export path could accidentally reach into; a separate bucket cannot be,
+    short of explicitly being handed its credentials.
+
+    Same never-raises/best-effort contract as publish_snapshot: freezing to
+    object storage is a nice-to-have copy for the pipeline team to pull from.
+    The load-bearing exclusion (an image_id can never end up in a train/val
+    export once it's golden) lives in the golden_set_items DB row, written
+    by the caller regardless of whether this upload succeeds - see
+    golden_service.add_items.
+    """
+    if not is_configured(settings):
+        return PublishResult(
+            published=False,
+            error="Object store not configured (set S3_ENDPOINT_URL, S3_ACCESS_KEY, S3_SECRET_KEY)",
+        )
+
+    bucket = settings.golden_s3_bucket
+    prefix = settings.golden_s3_prefix.strip("/")
+    key_root = f"{prefix}/{dataset_view}/v{version}" if prefix else f"{dataset_view}/v{version}"
+
+    try:
+        client = _client(settings)
+    except ImportError as exc:
+        return PublishResult(published=False, bucket=bucket, error=f"boto3 not installed, cannot publish: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Could not build an S3 client")
+        return PublishResult(published=False, bucket=bucket, error=f"{type(exc).__name__}: {exc}")
+
+    try:
+        _ensure_bucket(client, bucket)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Golden bucket %s unusable", bucket)
+        return PublishResult(published=False, bucket=bucket, error=f"{type(exc).__name__}: {exc}")
+
+    image_key = f"{key_root}/images/{image_path.name}"
+    label_key = f"{key_root}/labels/{image_id}.txt"
+    try:
+        client.upload_file(str(image_path), bucket, image_key)
+        client.put_object(Bucket=bucket, Key=label_key, Body=label_text.encode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Freezing golden item %s (%s v%d) failed", image_id, dataset_view, version)
+        return PublishResult(published=False, bucket=bucket, prefix=key_root, error=f"{type(exc).__name__}: {exc}")
+
+    logger.info("Froze golden item %s to %s/%s", image_id, bucket, image_key)
+    return PublishResult(published=True, uploaded_files=2, bucket=bucket, prefix=image_key)
+
+
 def _ensure_bucket(client, bucket: str) -> None:
     """Create the bucket if it isn't there. MinIO starts with none, and failing
     a publish because nobody clicked "create bucket" in a console is not a
