@@ -24,7 +24,9 @@ from app.models.schemas import (
     DatasetInfo,
     ImageAnnotations,
     ImageListItem,
+    MaskSource,
     ObjectStatus,
+    Point,
 )
 from app.services import annotation_state_repo as state_repo
 from app.services import class_map_service
@@ -115,6 +117,9 @@ class DatasetService:
         self._colors: dict[str, str] = {}
         self._safety: dict[str, bool] = {}
         self._fine_structure: dict[str, bool] = {}
+        self._states: dict[str, str] = {}
+        self._tiers: dict[str, str] = {}
+        self._ever_active: dict[str, bool] = {}
         self._class_map_version: Optional[int] = None
         self._class_map_hash: Optional[str] = None
         self._loaded = False
@@ -196,6 +201,9 @@ class DatasetService:
             # existing choices, or the new defaults).
             self._safety = state_repo.get_safety_flags(db, self._dataset_key)
             self._fine_structure = state_repo.get_fine_structure_flags(db, self._dataset_key)
+            self._states = state_repo.get_class_states(db, self._dataset_key)
+            self._tiers = state_repo.get_class_tiers(db, self._dataset_key)
+            self._ever_active = state_repo.get_ever_active_flags(db, self._dataset_key)
         finally:
             db.close()
 
@@ -252,6 +260,13 @@ class DatasetService:
                 color=self._colors.get(str(i), DEFAULT_PALETTE[i % len(DEFAULT_PALETTE)]),
                 safety_critical=self._safety.get(str(i), False),
                 fine_structure=self._fine_structure.get(str(i), False),
+                # Fallbacks match the DatasetClass column's own server_default
+                # values, not "discovered" - a class missing from this dict
+                # (shouldn't happen once synced) is treated the same
+                # conservative way an untouched pre-migration row is.
+                state=self._states.get(str(i), "active"),
+                tier=self._tiers.get(str(i), "structural"),
+                ever_active=self._ever_active.get(str(i), False),
             )
             for i, name in enumerate(self._classes)
         ]
@@ -293,6 +308,79 @@ class DatasetService:
 
     def is_fine_structure(self, class_id: int) -> bool:
         return self._fine_structure.get(str(class_id), False)
+
+    _VALID_STATES = ("discovered", "collecting_data", "eligible", "active", "deprecated")
+    _VALID_TIERS = ("cosmetic", "structural", "safety")
+
+    def set_class_state(self, class_id: int, state: str) -> None:
+        """Direct state override - used by class_eligibility_service's
+        recompute (discovered -> collecting_data -> eligible transitions)
+        and by tests. Deprecation has its own method (mark_class_deprecated)
+        since it also stamps who/when, not just the bare state string - and
+        is the ONLY path allowed to touch 'active': moving OUT of active,
+        or INTO 'deprecated' by any route other than mark_class_deprecated,
+        would either silently demote a shipped class (the exact thing
+        "ACTIVE is sticky" exists to prevent) or create a deprecated row
+        with no deprecated_at/deprecated_by_id audit trail. Both refused
+        here, unconditionally."""
+        if state not in self._VALID_STATES:
+            raise ValueError(f"Invalid class state {state!r}; must be one of {self._VALID_STATES}")
+        if state == "deprecated":
+            raise ValueError("Use mark_class_deprecated(), not set_class_state(), to deprecate a class")
+        current = self._states.get(str(class_id))
+        if current == "active":
+            raise ValueError(
+                f"Class {class_id} is 'active' - only mark_class_deprecated() may move it out of that state"
+            )
+        with self._lock:
+            db = SessionLocal()
+            try:
+                found = state_repo.set_class_state(db, self._dataset_key, class_id, state)
+            finally:
+                db.close()
+            if not found:
+                raise ValueError(f"No class {class_id} in this dataset view")
+            self._states[str(class_id)] = state
+
+    def set_class_tier(self, class_id: int, tier: str) -> None:
+        if tier not in self._VALID_TIERS:
+            raise ValueError(f"Invalid class tier {tier!r}; must be one of {self._VALID_TIERS}")
+        with self._lock:
+            db = SessionLocal()
+            try:
+                found = state_repo.set_class_tier(db, self._dataset_key, class_id, tier)
+            finally:
+                db.close()
+            if not found:
+                raise ValueError(f"No class {class_id} in this dataset view")
+            self._tiers[str(class_id)] = tier
+
+    def mark_class_deprecated(self, class_id: int, annotator_id: Optional[int]) -> None:
+        """Explicitly retires a class (docs/mlflow_class_incremental_architecture.md
+        §D) - never silent, never automatic. Only an ACTIVE class can be
+        deprecated: a discovered/collecting_data class was never shipped, so
+        there is nothing to retire (delete the class row by hand if it was a
+        mistake, that's a different operation from deprecation); an already
+        -deprecated or eligible class deprecating again/early is also refused
+        rather than silently no-op'd, so a caller's mistaken assumption is
+        visible immediately."""
+        with self._lock:
+            current = self._states.get(str(class_id))
+            if current is None:
+                raise ValueError(f"No class {class_id} in this dataset view")
+            if current != "active":
+                raise ValueError(
+                    f"Class {class_id} is '{current}', not 'active' - only an active class can be deprecated"
+                )
+            db = SessionLocal()
+            try:
+                found = state_repo.mark_class_deprecated(db, self._dataset_key, class_id, annotator_id)
+            finally:
+                db.close()
+            if not found:
+                raise ValueError(f"No class {class_id} in this dataset view")
+            self._states[str(class_id)] = "deprecated"
+            self._ever_active[str(class_id)] = True
 
     def add_class(self, name: str) -> ClassInfo:
         """Add a new class the detector never saw, persisting it back to disk
@@ -444,7 +532,9 @@ class DatasetService:
             # no confidence value at all (plain YOLO label files never do) -
             # hence None, not 0.0: "no signal" and "low confidence" are
             # different facts and 0.0 conflated them (see AnnotationObject).
-            detections = [(class_id, bbox, None) for class_id, bbox in pre_existing]
+            # No polygon either: a plain YOLO detection label file has never
+            # carried one.
+            detections = [(class_id, bbox, None, []) for class_id, bbox in pre_existing]
         else:
             detections = self._try_auto_detect(path)
         objects = [
@@ -453,10 +543,21 @@ class DatasetService:
                 class_id=class_id,
                 class_name=self._classes[class_id] if class_id < len(self._classes) else f"class_{class_id}",
                 bbox=bbox,
+                polygon=polygon,
                 detector_confidence=detector_confidence,
-                status=ObjectStatus.PENDING,
+                # Same number as detector_confidence, deliberately - see
+                # AnnotationObject.mask_confidence's docstring for why a
+                # detector-predicted polygon has no independent mask score
+                # to report. Left at the field default (0.0) when there's no
+                # polygon yet, same as before Option B.
+                mask_confidence=detector_confidence if polygon and detector_confidence is not None else 0.0,
+                mask_source=MaskSource.DETECTOR if polygon else None,
+                # A polygon here means the detector already produced a mask
+                # (Option B) - AUTO_GENERATED, same status SAM2 output gets,
+                # not PENDING (which means "no mask exists yet").
+                status=ObjectStatus.AUTO_GENERATED if polygon else ObjectStatus.PENDING,
             )
-            for class_id, bbox, detector_confidence in detections
+            for class_id, bbox, detector_confidence, polygon in detections
         ]
         annotations = ImageAnnotations(
             image_id=image_id,
@@ -468,9 +569,13 @@ class DatasetService:
         )
         return annotations
 
-    def _try_auto_detect(self, path: Path) -> list[tuple[int, BoundingBox, Optional[float]]]:
+    def _try_auto_detect(self, path: Path) -> list[tuple[int, BoundingBox, Optional[float], list[Point]]]:
         """Fall back to the most recently trained detector for images that
-        have no pre-existing detection labels at all."""
+        have no pre-existing detection labels at all. The fourth element is
+        the detector's own predicted mask polygon (Option B) - empty when
+        the active checkpoint has no seg head or its confidence was too low
+        to trust, in which case the object is pre-filled with a box only,
+        exactly as before, and SAM2 fills the mask in later as usual."""
         try:
             from app.services.detector_service import get_detector_service
 

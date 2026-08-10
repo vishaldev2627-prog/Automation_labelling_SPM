@@ -271,6 +271,23 @@ class DatasetClass(Base):
     color: Mapped[str] = mapped_column(String, nullable=False)
     safety_critical: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     fine_structure: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Class lifecycle (see docs/mlflow_class_incremental_architecture.md §D).
+    # One of discovered/collecting_data/eligible/active/deprecated - not a
+    # DB-level enum, validated in Python at the service layer instead (same
+    # choice this codebase already made for `ModelPromotion.status`).
+    # Backfilled to "active" for every pre-existing row by the migration
+    # that adds this column: every class here today predates the lifecycle
+    # and has already been trained on in real runs, so this column must
+    # never retroactively demote something already shipping.
+    state: Mapped[str] = mapped_column(String, nullable=False, server_default="active")
+    # cosmetic/structural/safety - reuses pipeline.md's existing tier
+    # vocabulary rather than inventing a parallel one. Backfilled from
+    # safety_critical (true -> safety, else -> structural, never cosmetic
+    # by default - a conservative default a human can loosen later, not a
+    # claim this codebase is making about any specific class).
+    tier: Mapped[str] = mapped_column(String, nullable=False, server_default="structural")
+    deprecated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deprecated_by_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
 
 
 class GoldenSet(Base):
@@ -379,6 +396,18 @@ class ModelPromotion(Base):
     # say) changes afterward.
     promotion_recommendation: Mapped[str] = mapped_column(String, nullable=False)
     regressed_classes: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Module 6 of the class-incremental promotion plan (docs/
+    # mlflow_class_incremental_architecture.md §I) - copied from the
+    # `decision`/`hard_fail` tags model_registry_service writes (Module 5),
+    # same "copied, not re-derived later" reasoning as promotion_recommendation
+    # above. "REJECT" is the fail-closed default for a version registered
+    # before this column existed, or whose `decision` tag is missing for any
+    # other reason - never treated as an implicit PROMOTE.
+    decision: Mapped[str] = mapped_column(String, nullable=False, server_default="REJECT")
+    hard_fail: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Set only when a model_reviewer overrides an ordinary REJECT (never
+    # possible for hard_fail=true - see model_promotion_service.approve()).
+    override_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, server_default="pending")
     local_weights_path: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

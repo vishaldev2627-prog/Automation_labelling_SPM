@@ -25,6 +25,8 @@ def create_pending(
     mlflow_run_id: str,
     promotion_recommendation: str,
     regressed_classes: Optional[str],
+    decision: str = "REJECT",
+    hard_fail: bool = False,
 ) -> ModelPromotion:
     promotion = ModelPromotion(
         dataset_view=dataset_view,
@@ -33,6 +35,8 @@ def create_pending(
         mlflow_run_id=mlflow_run_id,
         promotion_recommendation=promotion_recommendation,
         regressed_classes=regressed_classes,
+        decision=decision,
+        hard_fail=hard_fail,
         status="pending",
     )
     db.add(promotion)
@@ -87,7 +91,15 @@ def get_last_approved(db: Session, dataset_view: str) -> Optional[ModelPromotion
     ).scalar_one_or_none()
 
 
-def decide(db: Session, promotion_id: int, *, status: str, decided_by_id, local_weights_path: Optional[str] = None) -> ModelPromotion:
+def decide(
+    db: Session,
+    promotion_id: int,
+    *,
+    status: str,
+    decided_by_id,
+    local_weights_path: Optional[str] = None,
+    override_reason: Optional[str] = None,
+) -> ModelPromotion:
     promotion = get(db, promotion_id)
     if promotion is None:
         raise LookupError(f"No model promotion with id {promotion_id}")
@@ -96,6 +108,8 @@ def decide(db: Session, promotion_id: int, *, status: str, decided_by_id, local_
     promotion.decided_by_id = decided_by_id
     if local_weights_path is not None:
         promotion.local_weights_path = local_weights_path
+    if override_reason is not None:
+        promotion.override_reason = override_reason
     db.commit()
     db.refresh(promotion)
     return promotion

@@ -163,6 +163,71 @@ class Settings(BaseSettings):
     model_promotion_poll_enabled: bool = True
     model_promotion_poll_interval_seconds: int = 1800
 
+    # Class-incremental promotion plan, Module 2: class eligibility
+    # (docs/mlflow_class_incremental_architecture.md §E). Per-tier floors a
+    # class must clear before class_eligibility_service ever moves it out
+    # of discovered/collecting_data into eligible (and therefore into
+    # _assemble_dataset's training set, Module 3). These are STARTING
+    # POINTS, not calibrated numbers - the doc's own §E instruction is to
+    # run a learning-curve probe (per-class AP vs. N) once real data for a
+    # given class exists, and adjust from measured evidence, never loosen
+    # without it.
+    eligibility_min_instances_safety: int = 150
+    eligibility_min_instances_structural: int = 100
+    eligibility_min_instances_cosmetic: int = 80
+    eligibility_min_images_safety: int = 60
+    eligibility_min_images_structural: int = 50
+    eligibility_min_images_cosmetic: int = 40
+    eligibility_min_coach_types_safety: int = 2
+    eligibility_min_coach_types_structural: int = 1
+    eligibility_min_coach_types_cosmetic: int = 1
+    eligibility_min_val_instances: int = 15
+    # The old "8% of the dataset" idea - kept only as a cheap secondary
+    # signal (worth checking absolute floors now), never the actual gate.
+    # Not read by class_eligibility_service's determine_state() at all
+    # today; reserved for a future dashboard/early-warning surface.
+    eligibility_relative_share_trigger: float = 0.08
+    eligibility_poll_enabled: bool = True
+    eligibility_poll_interval_seconds: int = 1800
+
+    # Class-incremental promotion plan, Module 4: the compare()/
+    # should_promote() thresholds (docs/mlflow_class_incremental_
+    # architecture.md §H/§I). Every value below is a STARTING POINT, not a
+    # calibrated number - per the doc's own §E instruction, these should
+    # come from measured run-to-run noise floor (regression tolerance) and
+    # real learning-curve data (new-class floor), not stay as guesses.
+    #
+    # SCALE: fractional 0-1, matching Ultralytics' own mAP50 output
+    # (golden_eval_service reports e.g. 0.671, never "67.1") - NOT the
+    # doc's human-readable "91% AP" percentage language. Mixing scales here
+    # would make Layer 2 reject every class unconditionally and make
+    # Layer 1's tolerance nearly meaningless against real deltas - verified
+    # this distinction explicitly before wiring real data through it.
+    regression_tolerance_ap50_safety: float = 0.005
+    regression_tolerance_ap50_structural: float = 0.02
+    regression_tolerance_ap50_cosmetic: float = 0.03
+    new_class_floor_ap50_safety: float = 0.85
+    new_class_floor_ap50_structural: float = 0.70
+    new_class_floor_ap50_cosmetic: float = 0.55
+    # PLACEHOLDER - yolo11s-seg.pt inference is typically well under this;
+    # replace with a real measured p95 + margin before trusting this gate.
+    max_latency_p95_ms: float = 500.0
+    # PLACEHOLDER - yolo11s-seg.pt is ~20MB; generous headroom until a real
+    # deployment-size budget exists.
+    max_model_size_mb: float = 200.0
+    max_false_positive_rate_safety: float = 0.02
+    max_false_positive_rate_structural: float = 0.05
+    max_false_positive_rate_cosmetic: float = 0.10
+
+    # Module 8: Ultralytics' own built-in inverse-class-frequency loss
+    # weighting (DetectionTrainer.set_class_weights, verified against the
+    # installed version's source) - exponent applied to inverse class
+    # frequency, range [0, 1], 0 disables it entirely (Ultralytics' own
+    # default). 0.5 is a deliberately dampened starting point - full (1.0)
+    # inverse-frequency weighting can overcorrect when a brand-new class
+    # is still numerically tiny, swinging the loss too far the other way.
+    class_weight_power: float = 0.5
+
     # Logging
     log_level: str = "INFO"
     log_file: str = "../logs/backend.log"

@@ -1,10 +1,22 @@
 """Detector training and inference.
 
-Fine-tunes a YOLOv8 detection model on whichever annotations you've reviewed
-and marked complete (the same trust boundary export already uses), then runs
-the most recently trained model on brand-new images that have no existing
-labels at all - so boxes/classes it already learned show up automatically
-instead of needing everything drawn by hand.
+Fine-tunes a YOLO11 **segmentation** model on whichever annotations you've
+reviewed and marked complete (the same trust boundary export already uses),
+then runs the most recently trained model on brand-new images that have no
+existing labels at all - so boxes/classes it already learned show up
+automatically instead of needing everything drawn by hand.
+
+Trains on polygons, not boxes: `_assemble_dataset` writes YOLO-seg label
+lines (one per polygon piece, same convention `export_service` already uses
+for the handoff snapshot) rather than derived bounding boxes, and the base
+checkpoint is a `*-seg.pt` weight. `detect()` returns both a bounding box
+*and* the model's own predicted mask polygon per detection - `dataset_service`
+uses the polygon to pre-fill an annotation directly, so a confident
+detection skips a SAM2 mask-generation pass entirely (that object simply
+already has a polygon by the time `generate_all_masks` would have run SAM2
+on it). See `MaskSource` in app.models.schemas for how the rest of the
+pipeline (auto_accept, in particular) tells that case apart from a SAM2-
+produced mask.
 
 Registry and weights are scoped **per dataset view**, not per models_dir:
 DetectorService is session-scoped (see app.session_context) and each session
@@ -30,15 +42,20 @@ from pathlib import Path
 from typing import Optional
 
 from app.config import get_settings
-from app.models.schemas import BoundingBox, DetectorInfo, DetectorTrainJobStatus, ObjectStatus
+from app.models.schemas import BoundingBox, DetectorInfo, DetectorTrainJobStatus, ObjectStatus, Point
 from app.db import SessionLocal
 from app.services import golden_eval_service, golden_repo, gpu_scheduler, mlflow_tracking, model_registry_service
 from app.services.dataset_service import DatasetNotFoundError, DatasetService
 from app.utils.file_utils import atomic_write_json, new_id, read_json
+from app.utils.yolo_utils import write_segmentation_label_file
 
 logger = logging.getLogger(__name__)
 
-MODEL_WEIGHTS = "yolov8s.pt"
+# YOLO11 segmentation checkpoint - was yolov8s.pt (detection). "s" scale kept
+# for parity with the previous base weight; ultralytics infers task="segment"
+# from the checkpoint itself, no separate task= flag needed anywhere below.
+MODEL_WEIGHTS = "yolo11s-seg.pt"
+TASK = "segment"
 EPOCHS = 100
 VAL_SPLIT = 0.1
 MIN_TRAINING_IMAGES = 2
@@ -198,11 +215,18 @@ class DetectorService:
         )
 
     # ------------------------------------------------------------- training
-    def start_training(self, trigger: str = "manual") -> DetectorTrainJobStatus:
+    def start_training(self, trigger: str = "manual", dataset_snapshot_id: Optional[str] = None) -> DetectorTrainJobStatus:
         """`trigger` is recorded as an MLflow tag only - "manual" (a person
         clicked the button) vs "export_handoff" (M9/W-auto: kicked off
         automatically when a snapshot finalizes, see export_service). Purely
-        descriptive; doesn't change how training runs."""
+        descriptive; doesn't change how training runs.
+
+        `dataset_snapshot_id` (Module 9 of the class-incremental promotion
+        plan - docs/mlflow_class_incremental_architecture.md §G) is only
+        ever real for an export_handoff trigger - a manual trigger trains
+        directly off live annotation state, with no snapshot behind it at
+        all, so this stays None there rather than fabricating a reference
+        to something that doesn't exist."""
         self._ds.require_loaded()
         job_id = new_id()
         status = DetectorTrainJobStatus(
@@ -215,7 +239,9 @@ class DetectorService:
         )
         with self._lock:
             self._jobs[job_id] = status
-        threading.Thread(target=self._run_training, args=(job_id, trigger), daemon=True).start()
+        threading.Thread(
+            target=self._run_training, args=(job_id, trigger, dataset_snapshot_id), daemon=True
+        ).start()
         return status
 
     def get_job(self, job_id: str) -> Optional[DetectorTrainJobStatus]:
@@ -230,13 +256,15 @@ class DetectorService:
                 setattr(job, key, value)
             job.updated_at = time.time()
 
-    def _run_training(self, job_id: str, trigger: str = "manual") -> None:
+    def _run_training(self, job_id: str, trigger: str = "manual", dataset_snapshot_id: Optional[str] = None) -> None:
         staging_dir = self._models_dir / "training_runs" / job_id
         tracked = False
         run_dir = staging_dir / "run"
         try:
-            classes = [c.name for c in self._ds.get_classes()]
-            data_yaml, num_images = self._assemble_dataset(staging_dir, classes)
+            all_classes = self._ds.get_classes()
+            classes = [c.name for c in all_classes]
+            trainable_class_ids = {c.class_id for c in all_classes if c.state in ("eligible", "active")}
+            data_yaml, num_images = self._assemble_dataset(staging_dir, classes, trainable_class_ids)
             if num_images < MIN_TRAINING_IMAGES:
                 raise RuntimeError(
                     f"Only {num_images} reviewed (saved + marked complete) image(s) with objects were found; "
@@ -305,7 +333,8 @@ class DetectorService:
             # "waiting_for_gpu" the entire time because of this).
             self._update(job_id, stage="training")
 
-            model = YOLO(MODEL_WEIGHTS)
+            base_weights_path, parent_model_version = self._resolve_base_weights(settings)
+            model = YOLO(base_weights_path)
 
             # M5 (Scope A only - see mlflow_tracking's module docstring):
             # unconditionally attempted, never blocks training if MLflow is
@@ -321,16 +350,35 @@ class DetectorService:
                 },
             )
             if tracked:
-                mlflow_tracking.log_params(
-                    {
-                        "base_weights": MODEL_WEIGHTS,
-                        "epochs": EPOCHS,
-                        "patience": 20,
-                        "device": device,
-                        "num_images": num_images,
-                        "num_classes": len(classes),
-                    }
-                )
+                params = {
+                    "base_weights": base_weights_path,
+                    "task": TASK,
+                    "epochs": EPOCHS,
+                    "patience": 20,
+                    "device": device,
+                    "num_images": num_images,
+                    "num_classes": len(classes),
+                    "class_weight_power": settings.class_weight_power,
+                }
+                # Module 9 (docs/mlflow_class_incremental_architecture.md
+                # §G): class_map_version is always real (every loaded
+                # dataset has one); dataset_snapshot_id is only ever real
+                # for an export_handoff trigger - a manual trigger trains
+                # off live state directly, with no snapshot behind it, so
+                # this stays absent rather than fabricated there.
+                if self._ds.class_map_version is not None:
+                    params["class_map_version"] = self._ds.class_map_version
+                if dataset_snapshot_id:
+                    params["dataset_snapshot_id"] = dataset_snapshot_id
+                # Only set when this run genuinely warm-started from a real
+                # Production version - never fabricated on a cold start
+                # (docs/mlflow_class_incremental_architecture.md §G: this
+                # param and model_registry_service's `baseline_version` tag
+                # are usually, but not always, the same version - see that
+                # module's own note on why).
+                if parent_model_version:
+                    params["parent_model_version"] = parent_model_version
+                mlflow_tracking.log_params(params)
 
             def on_epoch_end(trainer) -> None:
                 try:
@@ -363,6 +411,15 @@ class DetectorService:
                 exist_ok=True,
                 verbose=False,
                 patience=20,
+                # Module 8 (docs/mlflow_class_incremental_architecture.md
+                # §F): Ultralytics' own built-in inverse-class-frequency
+                # loss weighting (verified against the installed version's
+                # source - DetectionTrainer.set_class_weights, gated by
+                # this exact arg, disabled by default at cls_pw=0.0). Keeps
+                # a newly-eligible class from being drowned out in early
+                # batches purely because it's numerically minor relative to
+                # long-shipping classes.
+                cls_pw=settings.class_weight_power,
             )
 
             self._update(job_id, stage="saving")
@@ -386,6 +443,13 @@ class DetectorService:
                     # which view's annotations produced it - the thing the
                     # old global registry could not answer.
                     "dataset_key": self._ds.dataset_key,
+                    # Self-describing about what kind of checkpoint this is -
+                    # a future registry consumer (or a manually dropped-in
+                    # weights file) can be checked against this rather than
+                    # assuming every registry.json ever written is a
+                    # detection checkpoint.
+                    "task": TASK,
+                    "base_weights": MODEL_WEIGHTS,
                 }
             )
             self._save_registry(registry)
@@ -410,9 +474,30 @@ class DetectorService:
                     finally:
                         db.close()
                     if golden_ids:
-                        eval_result = golden_eval_service.evaluate_on_golden_set(
-                            self._ds, golden_ids, dest, classes, staging_dir
-                        )
+                        try:
+                            eval_result = golden_eval_service.evaluate_on_golden_set(
+                                self._ds, golden_ids, dest, classes, staging_dir,
+                                candidate_class_ids=trainable_class_ids,
+                            )
+                        except golden_eval_service.InsufficientGoldenCoverageError as exc:
+                            # Module 7 (docs/mlflow_class_incremental_
+                            # architecture.md §J's flagged operational
+                            # prerequisite): a candidate class with zero
+                            # golden coverage must never silently produce a
+                            # meaningless zero-instance metric. eval_result
+                            # stays None, so M7's register_and_recommend
+                            # below never runs for this run at all - no
+                            # version gets registered, so nothing is even
+                            # promotable, which is the safe direction of
+                            # error. Tagged on the run so a curator sees
+                            # exactly why, rather than a bare skipped eval.
+                            logger.warning(
+                                "Golden coverage gap for %s: %s", self._ds.dataset_key, exc
+                            )
+                            if tracked:
+                                mlflow_tracking.set_tags(
+                                    {"golden_coverage_gap": ",".join(map(str, exc.class_ids))}
+                                )
                         if eval_result and tracked:
                             golden_metrics = {
                                 f"golden/aggregate_{k}": v for k, v in eval_result["aggregate"].items()
@@ -423,7 +508,15 @@ class DetectorService:
                                 )
                             mlflow_tracking.log_metrics(golden_metrics, step=EPOCHS)
                             mlflow_tracking.set_tags(
-                                {"golden_eval_images": str(eval_result["num_golden_images"])}
+                                {
+                                    "golden_eval_images": str(eval_result["num_golden_images"]),
+                                    # Load-bearing for anyone reading historical
+                                    # runs later: golden/class{N}_mAP50 means
+                                    # *mask* AP from here on, not box AP as it
+                                    # did for every yolov8s.pt run before this -
+                                    # see golden_eval_service's module docstring.
+                                    "eval_task": TASK,
+                                }
                             )
                     else:
                         logger.info(
@@ -447,8 +540,17 @@ class DetectorService:
                 if eval_result:
                     run_id = mlflow_tracking.current_run_id()
                     if run_id:
+                        model_size_mb = dest.stat().st_size / (1024 * 1024)
+                        latency_p95_ms = self._measure_inference_latency_ms(model)
                         model_registry_service.register_and_recommend(
-                            _slug_for(self._ds.dataset_key), run_id, eval_result["per_class"]
+                            _slug_for(self._ds.dataset_key),
+                            run_id,
+                            eval_result["per_class"],
+                            self._ds.get_classes(),
+                            model_size_mb=model_size_mb,
+                            latency_p95_ms=latency_p95_ms,
+                            dataset_snapshot_id=dataset_snapshot_id,
+                            class_map_version=self._ds.class_map_version,
                         )
 
                 mlflow_tracking.end(status="FINISHED")
@@ -485,10 +587,107 @@ class DetectorService:
             waited += settings.gpu_wait_poll_seconds
         return True
 
-    def _assemble_dataset(self, staging_dir: Path, classes: list[str]) -> tuple[Path, int]:
-        """Write a fresh YOLO-detection dataset from images you've reviewed and
-        marked complete - the same trust boundary export() already uses, so
-        the detector only ever learns from annotations a human has approved."""
+    def _resolve_base_weights(self, settings) -> tuple[str, Optional[str]]:
+        """Module 8 of the class-incremental promotion plan (docs/
+        mlflow_class_incremental_architecture.md §F/§K item 7): warm-start
+        from the current Production version's weights instead of always
+        the stock checkpoint, so a retrain is a genuine continuation of
+        what already ships, not a from-scratch relearn of the old classes
+        alongside the new one.
+
+        Falls back to the stock checkpoint on ANY failure - no Production
+        version yet (the expected case for a view's first-ever run, logged
+        at info not warning), MLflow unreachable, or a download failure -
+        since this is an optimization, never a correctness requirement,
+        and must never block training.
+
+        Returns (weights_path_or_name, parent_model_version) - the second
+        is None on a cold start, so callers never fabricate lineage where
+        none exists.
+        """
+        if not mlflow_tracking.is_configured(settings):
+            return MODEL_WEIGHTS, None
+        try:
+            import mlflow
+            from mlflow.tracking import MlflowClient
+
+            mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+            client = MlflowClient()
+            name = model_registry_service.registered_model_name(_slug_for(self._ds.dataset_key))
+            production = client.get_latest_versions(name, stages=["Production"])
+            if not production:
+                logger.info("No Production version yet for %s; training from stock %s", name, MODEL_WEIGHTS)
+                return MODEL_WEIGHTS, None
+            prod_version = production[0]
+            downloaded = mlflow.artifacts.download_artifacts(
+                run_id=prod_version.run_id, artifact_path="weights/best.pt"
+            )
+            logger.info("Warm-starting %s from Production v%s (%s)", name, prod_version.version, downloaded)
+            return downloaded, prod_version.version
+        except Exception:
+            logger.exception(
+                "Could not warm-start from Production weights for %s; training from stock %s instead",
+                self._ds.dataset_key, MODEL_WEIGHTS,
+            )
+            return MODEL_WEIGHTS, None
+
+    @staticmethod
+    def _measure_inference_latency_ms(model) -> float:
+        """A rough p95 stand-in for promotion_gate.py's Layer 4 operational
+        check (docs/mlflow_class_incremental_architecture.md §G/§H) - a few
+        timed predictions on the same kind of synthetic probe image
+        `model_promotion_service._sanity_check` already uses before
+        activation, reusing the just-trained `model` object already in
+        memory rather than reloading from disk. Best-effort: any failure
+        here returns 0.0 (never blocks registration) - see the caller's own
+        try/except around the whole M7 block."""
+        import numpy as np
+
+        probe = np.zeros((640, 640, 3), dtype=np.uint8)
+        samples = []
+        for _ in range(5):
+            t0 = time.time()
+            model.predict(probe, verbose=False)
+            samples.append((time.time() - t0) * 1000)
+        samples.sort()
+        # 5 samples: index 4 (the slowest) stands in for p95 at this sample
+        # size - a real p95 needs far more than 5 draws, this is a cheap
+        # per-training-run proxy, not a statistically rigorous measurement.
+        return samples[-1]
+
+    def _assemble_dataset(
+        self, staging_dir: Path, classes: list[str], trainable_class_ids: set[int]
+    ) -> tuple[Path, int]:
+        """Write a fresh YOLO-**segmentation** dataset from images you've
+        reviewed and marked complete - the same trust boundary export()
+        already uses, so the detector only ever learns from annotations a
+        human has approved.
+
+        One label line per polygon piece, not one per object - the same
+        convention export_service._write_dataset uses for the handoff
+        snapshot, so a fine_structure class's disjoint pieces (a branching
+        crack) all contribute rather than only the largest surviving.
+
+        `trainable_class_ids` gates class eligibility (Module 3 of the
+        class-incremental promotion plan - docs/mlflow_class_incremental_
+        architecture.md §D/§E): only objects whose class_id is in this set
+        (state in {eligible, active}) ever produce a label line. A
+        discovered/collecting_data/deprecated class's objects are simply
+        dropped from the label file for that image - the image itself is
+        NOT excluded just because it also contains an untrainable class's
+        object; whatever trainable content it has still trains normally.
+        `classes`/`data.yaml`'s `names`/`nc` stay the FULL, real, unfiltered
+        class map (Ultralytics requires len(names) == nc; verified this
+        does not require every id to actually appear in a label file, so
+        this needs no renumbering and no placeholder-name scheme - a
+        detection's class_id in eval/inference output is therefore always
+        the same real global id annotators see, never repositioned)."""
+        excluded_class_ids = {i for i in range(len(classes)) if i not in trainable_class_ids}
+        if excluded_class_ids:
+            logger.info(
+                "Training excludes class id(s) %s (not yet eligible/active) for %s",
+                sorted(excluded_class_ids), self._ds.dataset_key,
+            )
         image_ids = [
             image_id for image_id in self._ds.image_ids() if self._ds.get_annotations(image_id).completed
         ]
@@ -504,26 +703,29 @@ class DetectorService:
             lbl_dir.mkdir(parents=True, exist_ok=True)
             for image_id in ids:
                 annotations = self._ds.get_annotations(image_id)
-                objects = [o for o in annotations.objects if o.status != ObjectStatus.REJECTED]
+                live = [
+                    o for o in annotations.objects
+                    if o.status != ObjectStatus.REJECTED and o.class_id in trainable_class_ids
+                ]
+                objects = [
+                    (o.class_id, piece)
+                    for o in live
+                    for piece in [o.polygon, *o.extra_polygons]
+                    if len(piece) >= 3
+                ]
                 # An empty frame is included only when a human confirmed it is
                 # empty (see ImageAnnotations) - then it's a background/negative
                 # sample, written as an empty label file, which is what
                 # ultralytics expects and which teaches the pre-labeler where
-                # *not* to propose boxes. An unconfirmed empty frame is still
-                # skipped: it just means nobody has annotated it yet.
+                # *not* to propose a mask. An unconfirmed empty frame is still
+                # skipped: it just means nobody has annotated it yet. An object
+                # with a status but no usable polygon (<3 points) contributes
+                # nothing and is treated the same as "no objects" here.
                 if not objects and not annotations.no_objects_confirmed:
                     continue
                 src_image = self._ds.get_image_path(image_id)
                 shutil.copy2(src_image, img_dir / src_image.name)
-                lines = [
-                    f"{o.class_id} {o.bbox.x_center:.6f} {o.bbox.y_center:.6f} {o.bbox.width:.6f} {o.bbox.height:.6f}"
-                    for o in objects
-                ]
-                # Truly empty, not a single blank line - a stray "\n" is a
-                # malformed label line to some YOLO loaders.
-                (lbl_dir / f"{image_id}.txt").write_text(
-                    "\n".join(lines) + "\n" if lines else "", encoding="utf-8"
-                )
+                write_segmentation_label_file(lbl_dir / f"{image_id}.txt", objects)
                 total_images += 1
 
         import yaml
@@ -557,14 +759,27 @@ class DetectorService:
             self._loaded_model_path = path
             return self._loaded_model
 
-    def detect(self, image_path: Path, classes: list[str]) -> list[tuple[int, BoundingBox, float]]:
+    def detect(
+        self, image_path: Path, classes: list[str]
+    ) -> list[tuple[int, BoundingBox, float, list[Point]]]:
         """Run the most recently trained detector on an image with no
-        pre-existing labels, returning (class_id, bbox, confidence) tuples -
-        confidence is ultralytics' own box.conf, otherwise discarded here
-        the same way it always was upstream of parse_detection_label_file
-        (plain YOLO label files carry no confidence field at all). Used by
-        the Phase 2 triage service as the only confidence signal available
-        before the pipeline supplies its own (see Q-E, build plan §6)."""
+        pre-existing labels, returning (class_id, bbox, confidence, polygon)
+        tuples - confidence is ultralytics' own box.conf, otherwise
+        discarded here the same way it always was upstream of
+        parse_detection_label_file (plain YOLO label files carry no
+        confidence field at all). Used by the Phase 2 triage service as the
+        only confidence signal available before the pipeline supplies its
+        own (see Q-E, build plan §6).
+
+        `polygon` is the segmentation model's own predicted mask contour
+        (ultralytics' `result.masks.xyn`, already extracted and normalized
+        0-1) - empty unless `confidence` clears `mask_confidence_threshold`,
+        the same "never show a bad mask" bar `mask_generation_service`
+        applies to SAM2's own output. `dataset_service.get_annotations` uses
+        a non-empty polygon here to pre-fill the annotation directly
+        (Option B) instead of leaving the mask for SAM2 to generate; an
+        empty polygon (low confidence, or a checkpoint with no seg head)
+        falls back to exactly the box-only behavior this had before."""
         if not self.is_active():
             return []
         model = self._ensure_model_loaded()
@@ -573,12 +788,22 @@ class DetectorService:
             return []
         result = results[0]
         h, w = result.orig_shape
-        detections: list[tuple[int, BoundingBox, float]] = []
-        for box in result.boxes:
+        mask_threshold = get_settings().mask_confidence_threshold
+        # None for a detection-only checkpoint (no seg head) - a leftover
+        # yolov8s.pt-era registry.json is still loadable, just without polygons.
+        mask_polys = result.masks.xyn if result.masks is not None else None
+        detections: list[tuple[int, BoundingBox, float, list[Point]]] = []
+        for idx, box in enumerate(result.boxes):
             class_id = int(box.cls.item())
             if class_id >= len(classes):
                 continue
             x1, y1, x2, y2 = box.xyxy[0].tolist()
+            confidence = float(box.conf.item())
+            polygon: list[Point] = []
+            if mask_polys is not None and confidence > mask_threshold:
+                xy = mask_polys[idx]
+                if len(xy) >= 3:
+                    polygon = [Point(x=float(px), y=float(py)) for px, py in xy]
             detections.append(
                 (
                     class_id,
@@ -588,7 +813,8 @@ class DetectorService:
                         width=(x2 - x1) / w,
                         height=(y2 - y1) / h,
                     ),
-                    float(box.conf.item()),
+                    confidence,
+                    polygon,
                 )
             )
         return detections

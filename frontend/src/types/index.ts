@@ -12,6 +12,13 @@ export interface BoundingBox {
 
 export type ObjectStatus = "pending" | "auto_generated" | "edited" | "confirmed" | "rejected";
 export type ObjectSource = "detection_box" | "manual" | "propagated";
+/** Which model produced the object's *current* polygon — independent of
+ * ObjectSource, which is about the box/class, not the mask. `null` means no
+ * polygon exists yet. `"detector"` is the YOLO11-seg pre-labeler's own
+ * predicted mask, not yet touched by SAM2 — not auto-accept eligible even at
+ * high confidence, see the backend's MaskSource docstring. Regenerating the
+ * mask (SAM2) always flips this to `"sam2"`. */
+export type MaskSource = "sam2" | "detector" | null;
 
 /** Component condition — verbatim from pipeline.md §5.2. Orthogonal to
  * class_id: class_id is *what the component is*, this is *what state it's in*.
@@ -69,6 +76,7 @@ export interface AnnotationObject {
   // polygon right" and says nothing about the class.
   detector_confidence: number | null;
   mask_confidence: number;
+  mask_source: MaskSource;
   all_mask_scores: number[];
   selected_mask_index: number;
   status: ObjectStatus;

@@ -10,6 +10,15 @@ Conservative by design, per product decision:
   docstring) - so it could skip human review because a polygon looked clean,
   not because the class was certain. An object now needs the detector to be
   sure about the class **and** SAM2 to be sure about the mask.
+- The mask specifically has to have come from SAM2 (`mask_source ==
+  MaskSource.SAM2`), never straight from the YOLO11-seg pre-labeler's own
+  predicted polygon (Option B, `mask_source == MaskSource.DETECTOR`). The
+  0.95 mask bar was calibrated against SAM2's score distribution and
+  behavior specifically; a detector-predicted polygon scoring 0.95 on its
+  own joint box/mask confidence is not the same reliability claim, even at
+  the same number (see AnnotationObject.mask_confidence's docstring). A
+  detector-seeded object becomes eligible the moment SAM2 actually
+  generates or confirms its mask, same as any other object - never before.
 - An object with no detector confidence at all (`None` - a box read from a
   plain YOLO label file, or anything annotated before the two signals were
   split apart) is never eligible. Absence of signal is not evidence.
@@ -50,11 +59,27 @@ CANDIDATE_LIMIT = 200
 
 def _object_is_acceptable(obj: dict, eligible_class_ids: set[int]) -> bool:
     """One object clears the bar: eligible class, detector sure of the class,
-    SAM2 sure of the mask. Missing detector confidence fails closed."""
+    a SAM2-produced mask SAM2 is sure of. Missing detector confidence, or a
+    mask that isn't SAM2's (e.g. still just the Option B detector-predicted
+    polygon, `mask_source="detector"`), both fail closed.
+
+    `obj` is a raw dict straight out of Postgres JSONB (`state_repo.get_state`),
+    never routed through `AnnotationObject`'s own `_backfill_mask_source`
+    validator - so a payload saved before `mask_source` existed has the key
+    *absent* entirely, not a `None` a validator already resolved to.
+    `.get("mask_source", "sam2")` treats absent-key as sam2 unconditionally
+    (not polygon-gated) - before this field existed, SAM2 was the only thing
+    that ever produced a mask or set mask_confidence, full stop, so there is
+    nothing to guess here. This must stay unconditional: an explicit
+    `mask_source: null` (a real object with no mask at all) is a *present*
+    key and correctly still fails via `.get`'s normal semantics.
+    """
     if obj.get("class_id") not in eligible_class_ids:
         return False
     detector_confidence = obj.get("detector_confidence")
     if detector_confidence is None or detector_confidence < DETECTOR_CONFIDENCE_THRESHOLD:
+        return False
+    if obj.get("mask_source", "sam2") != "sam2":
         return False
     return obj.get("mask_confidence", 0.0) >= MASK_CONFIDENCE_THRESHOLD
 

@@ -130,6 +130,11 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
       polygon: result.polygon,
       extra_polygons: result.extra_polygons,
       mask_confidence: result.confidence,
+      // This endpoint only ever runs SAM2 (see mask_generation_service), so
+      // this is always correct to set here, even for an object that arrived
+      // with a detector-predicted polygon — regenerating always makes SAM2
+      // the authority on the current mask.
+      mask_source: "sam2",
       all_mask_scores: result.all_scores,
       selected_mask_index: result.selected_mask_index,
       status: "auto_generated",
@@ -153,6 +158,7 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
       polygon: result.polygon,
       extra_polygons: result.extra_polygons,
       mask_confidence: result.confidence,
+      mask_source: "sam2",
       all_mask_scores: result.all_scores,
       selected_mask_index: result.selected_mask_index,
       status: "edited",
@@ -177,6 +183,7 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
       // confidence to record - null, not 0 (see AnnotationObject).
       detector_confidence: null,
       mask_confidence: result.confidence,
+      mask_source: "sam2",
       all_mask_scores: result.all_scores,
       selected_mask_index: result.selected_mask_index,
       status: "auto_generated",
@@ -195,6 +202,7 @@ export const useAnnotationStore = create<AnnotationState>((set, get) => ({
       polygon: result.polygon,
       extra_polygons: result.extra_polygons,
       mask_confidence: result.confidence,
+      mask_source: "sam2",
       selected_mask_index: result.selected_mask_index,
     }));
   },

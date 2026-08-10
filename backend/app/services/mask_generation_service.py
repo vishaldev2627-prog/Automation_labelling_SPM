@@ -9,7 +9,7 @@ from typing import Optional
 import numpy as np
 
 from app.config import Settings
-from app.models.schemas import AnnotationObject, ImageAnnotations, ObjectStatus, Point
+from app.models.schemas import AnnotationObject, ImageAnnotations, MaskSource, ObjectStatus, Point
 from app.services.dataset_service import DatasetService
 from app.services.polygon_service import mask_to_polygons
 from app.services.sam_service import SAMService
@@ -97,6 +97,13 @@ class MaskGenerationService:
         # conflation AnnotationObject's docstring describes, and it silently
         # fed auto_accept_service's gate.
         obj.mask_confidence = confidence
+        # Running SAM2 always makes it the authority on the *current* mask,
+        # even if the object arrived here with a detector-predicted polygon
+        # (Option B) - this is what lets such an object become auto-accept
+        # eligible afterward (see MaskSource's docstring), and what's
+        # actually true: whatever polygon existed before this call is now
+        # replaced.
+        obj.mask_source = MaskSource.SAM2
         obj.all_mask_scores = [float(s) for s in result.scores]
         obj.selected_mask_index = best_idx
         obj.status = ObjectStatus.AUTO_GENERATED if polygon else ObjectStatus.PENDING
@@ -113,12 +120,18 @@ class MaskGenerationService:
         obj.polygon = polygons[0] if polygons else []
         obj.extra_polygons = polygons[1:]
         obj.mask_confidence = float(result.scores[mask_index])
+        obj.mask_source = MaskSource.SAM2
         obj.all_mask_scores = [float(s) for s in result.scores]
         obj.selected_mask_index = mask_index
         return obj
 
     def generate_all_masks(self, annotations: ImageAnnotations, overwrite: bool = False) -> ImageAnnotations:
-        """Run SAM for every object in the image that doesn't already have a polygon."""
+        """Run SAM for every object in the image that doesn't already have a
+        polygon. This is what makes a detector-predicted polygon (Option B,
+        `mask_source=DETECTOR`) actually skip a SAM2 pass with no extra logic
+        here: it already has a polygon by the time this runs, so it's
+        indistinguishable from "already generated" and left alone unless
+        `overwrite=True` explicitly asks to redo it."""
         for obj in annotations.objects:
             if not overwrite and obj.polygon:
                 continue

@@ -94,6 +94,25 @@ class ObjectSource(str, Enum):
     PROPAGATED = "propagated"
 
 
+class MaskSource(str, Enum):
+    """Which model actually produced the object's *current* polygon —
+    independent of `ObjectSource`, which is about the box/class, not the
+    mask. Introduced alongside the YOLO11-seg pre-labeler (which predicts a
+    polygon directly, not just a box): before that, every polygon that ever
+    existed came from SAM2, so this distinction didn't need to exist.
+
+    `auto_accept_service` reads this: its `MASK_CONFIDENCE_THRESHOLD` gate
+    was calibrated against SAM2's score distribution specifically, and a
+    YOLO-seg mask score is not the same reliability claim even at the same
+    numeric value - so a detector-sourced mask is never auto-accept
+    eligible until SAM2 has actually produced or confirmed it, regardless
+    of how high its own confidence reads.
+    """
+
+    SAM2 = "sam2"
+    DETECTOR = "detector"
+
+
 class Point(BaseModel):
     x: float
     y: float
@@ -135,8 +154,16 @@ class AnnotationObject(BaseModel):
       `None` means no signal exists - a plain YOLO label file carries no
       confidence field, so absence is genuinely different from "low", and
       encoding it as 0.0 conflated the two.
-    - `mask_confidence`: SAM2's score for the currently selected mask. Says
-      nothing about whether the class is right.
+    - `mask_confidence`: confidence in the *currently selected* mask, from
+      whichever model actually produced it - see `mask_source`. For a SAM2
+      mask this is SAM2's own candidate score, genuinely independent of
+      class confidence. For a YOLO11-seg detector-predicted polygon (see
+      `detector_service.detect()`), box and mask come from one joint
+      forward pass, so this is deliberately the same number as
+      `detector_confidence` for that object - there is no second,
+      independent signal to report, and duplicating the one that exists is
+      more honest than leaving this at a stale 0.0 next to a non-empty
+      polygon. `mask_source` is what tells a reader which case they're in.
     """
 
     id: str
@@ -157,6 +184,7 @@ class AnnotationObject(BaseModel):
     extra_polygons: list[list[Point]] = Field(default_factory=list)
     detector_confidence: Optional[float] = None
     mask_confidence: float = 0.0
+    mask_source: Optional[MaskSource] = None
     all_mask_scores: list[float] = Field(default_factory=list)
     selected_mask_index: int = 0
     status: ObjectStatus = ObjectStatus.PENDING
@@ -191,6 +219,19 @@ class AnnotationObject(BaseModel):
             data = dict(data)
             data["mask_confidence"] = data.pop("confidence") or 0.0
         return data
+
+    @model_validator(mode="after")
+    def _backfill_mask_source(self):
+        """Every polygon persisted before `mask_source` existed came from
+        SAM2 - the detector-predicted-polygon path is strictly newer than
+        this field, so unlike `_migrate_legacy_confidence` there is no
+        ambiguity to guess at here. Only backfills when the stored payload
+        didn't already say otherwise; a payload saved after this field
+        existed always carries its real value explicitly, so this can never
+        overwrite a genuine `detector` value on reload."""
+        if self.polygon and self.mask_source is None:
+            self.mask_source = MaskSource.SAM2
+        return self
 
 
 class ImageAnnotations(BaseModel):
@@ -333,6 +374,16 @@ class ClassInfo(BaseModel):
     # See db_models.DatasetClass.fine_structure - thin/branching/length-measured
     # defects keep every contour, skip simplification, and export a mask raster.
     fine_structure: bool = False
+    # Class lifecycle (docs/mlflow_class_incremental_architecture.md §D):
+    # discovered/collecting_data/eligible/active/deprecated.
+    state: str = "active"
+    # cosmetic/structural/safety - see db_models.DatasetClass.tier.
+    tier: str = "structural"
+    # True if currently active OR was ever deprecated (deprecated_at set) -
+    # distinguishes a REINTRODUCED class from a genuinely brand-new one for
+    # promotion_gate.py's compare(), even while its current `state` reads
+    # discovered/collecting_data like any other newly-labeled class.
+    ever_active: bool = False
 
 
 class BatchProcessRequest(BaseModel):
@@ -538,8 +589,22 @@ class ModelPromotionInfo(BaseModel):
     mlflow_run_id: str
     promotion_recommendation: str
     regressed_classes: Optional[str] = None
+    # Module 6 (docs/mlflow_class_incremental_architecture.md §I) - the
+    # actual enforced verdict, distinct from the softer, advisory
+    # promotion_recommendation string above.
+    decision: str = "REJECT"
+    hard_fail: bool = False
+    override_reason: Optional[str] = None
     status: str
     local_weights_path: Optional[str] = None
     created_at: datetime
     decided_at: Optional[datetime] = None
     decided_by: Optional[str] = None
+
+
+class ApprovePromotionRequest(BaseModel):
+    """Only meaningful for an ordinary REJECT (never for hard_fail, which
+    accepts no override at all - see model_promotion_service.approve())."""
+
+    override: bool = False
+    override_reason: Optional[str] = None

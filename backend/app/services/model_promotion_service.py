@@ -68,6 +68,21 @@ class NotModelReviewerError(Exception):
     a model promotion."""
 
 
+class RejectedDecisionRequiresOverrideError(Exception):
+    """The promotion gate (Module 4/5) marked this candidate REJECT - a
+    model_reviewer may still choose to approve it anyway, but only via an
+    explicit, reasoned override (see approve()'s override/override_reason
+    params), never as the default path."""
+
+
+class HardFailBlocksApprovalError(Exception):
+    """A safety-tier regression or an unexplained class-set shrink
+    (docs/mlflow_class_incremental_architecture.md §I "HARD FAIL") -
+    unconditionally unapprovable. No override parameter is accepted for
+    this case at all; the only way forward is a new candidate that
+    actually passes."""
+
+
 def _is_model_reviewer(annotator: Optional[Annotator]) -> bool:
     """Pure predicate of an already-fetched Annotator, same split as
     golden_service._is_golden_curator - testable without a database."""
@@ -124,6 +139,9 @@ def check_for_new_production_version(
         return None  # already proposed (pending/approved/rejected) - nothing new
 
     tags = version.tags or {}
+    # Fail closed: a version with no `decision` tag at all (registered
+    # before Module 5 landed, or a registration that failed partway
+    # through tagging) is treated as REJECT, never as an implicit PROMOTE.
     promotion = repo.create_pending(
         db,
         dataset_view=dataset_view,
@@ -132,6 +150,8 @@ def check_for_new_production_version(
         mlflow_run_id=version.run_id,
         promotion_recommendation=tags.get("promotion_recommendation", "unknown"),
         regressed_classes=tags.get("regressed_classes"),
+        decision=tags.get("decision", "REJECT"),
+        hard_fail=tags.get("hard_fail") == "true",
     )
     logger.info(
         "New pending model promotion: %s v%s for %s (recommendation: %s)",
@@ -173,14 +193,48 @@ def _activate_weights(view_dir: Path, weights_src: Path, source_metadata: dict) 
 
 
 def approve(
-    db: Session, settings: Settings, models_dir: Path, promotion_id: int, annotator_id: Optional[int]
+    db: Session,
+    settings: Settings,
+    models_dir: Path,
+    promotion_id: int,
+    annotator_id: Optional[int],
+    override: bool = False,
+    override_reason: Optional[str] = None,
 ) -> ModelPromotion:
+    """Module 6 of the class-incremental promotion plan (docs/
+    mlflow_class_incremental_architecture.md §I): the promotion gate's
+    decision is now enforced here, not just advisory.
+
+    - `hard_fail=true` (a safety-tier regression, or an unexplained
+      class-set shrink) refuses UNCONDITIONALLY - no override accepted at
+      all, regardless of `override`/`override_reason`. The only way
+      forward is a new candidate that actually passes.
+    - `decision="REJECT"` (any other failing check) refuses by default,
+      but a model_reviewer may proceed via `override=True` plus a
+      non-empty `override_reason` - a distinct, deliberate, permanently
+      audited action, never the default path.
+    - `decision="PROMOTE"` needs no override at all - unchanged happy path.
+    """
     require_model_reviewer(db, annotator_id)
     promotion = repo.get(db, promotion_id)
     if promotion is None:
         raise LookupError(f"No model promotion with id {promotion_id}")
     if promotion.status != "pending":
         raise ValueError(f"Model promotion {promotion_id} is already '{promotion.status}', not pending")
+
+    if promotion.hard_fail:
+        raise HardFailBlocksApprovalError(
+            f"Promotion {promotion_id} carries a safety-tier regression or unexplained class-set "
+            f"shrink (hard_fail) - cannot be approved under any circumstance. Retrain and produce "
+            f"a candidate that actually passes."
+        )
+    if promotion.decision == "REJECT" and not override:
+        raise RejectedDecisionRequiresOverrideError(
+            f"Promotion {promotion_id} was rejected by the promotion gate; pass override=True with "
+            f"a non-empty override_reason to approve it anyway."
+        )
+    if override and not (override_reason and override_reason.strip()):
+        raise ValueError("override=True requires a non-empty override_reason")
 
     if not _configure_mlflow(settings):
         raise RuntimeError("MLflow is not configured (MLFLOW_TRACKING_URI unset) - cannot download this model")
@@ -202,7 +256,10 @@ def approve(
             "approved_by_annotator_id": annotator_id,
         },
     )
-    return repo.decide(db, promotion_id, status="approved", decided_by_id=annotator_id, local_weights_path=str(dest))
+    return repo.decide(
+        db, promotion_id, status="approved", decided_by_id=annotator_id,
+        local_weights_path=str(dest), override_reason=override_reason if override else None,
+    )
 
 
 def reject(db: Session, promotion_id: int, annotator_id: Optional[int]) -> ModelPromotion:

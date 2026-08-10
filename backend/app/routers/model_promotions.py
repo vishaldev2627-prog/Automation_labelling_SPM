@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models.schemas import ModelPromotionInfo
+from app.models.schemas import ApprovePromotionRequest, ModelPromotionInfo
 from app.services import model_promotion_repo as repo
 from app.services import model_promotion_service
 from app.session_context import get_current_annotator
@@ -29,6 +29,9 @@ def _to_info(promotion) -> ModelPromotionInfo:
         mlflow_run_id=promotion.mlflow_run_id,
         promotion_recommendation=promotion.promotion_recommendation,
         regressed_classes=promotion.regressed_classes,
+        decision=promotion.decision,
+        hard_fail=promotion.hard_fail,
+        override_reason=promotion.override_reason,
         status=promotion.status,
         local_weights_path=promotion.local_weights_path,
         created_at=promotion.created_at,
@@ -56,15 +59,22 @@ def list_history(dataset_view: str | None = None, limit: int = 50) -> list[Model
 
 
 @router.post("/{promotion_id}/approve", response_model=ModelPromotionInfo)
-def approve(promotion_id: int) -> ModelPromotionInfo:
+def approve(promotion_id: int, request: ApprovePromotionRequest = ApprovePromotionRequest()) -> ModelPromotionInfo:
     annotator_id, _ = get_current_annotator()
     settings = get_settings()
     db = SessionLocal()
     try:
-        promotion = model_promotion_service.approve(db, settings, settings.models_dir, promotion_id, annotator_id)
+        promotion = model_promotion_service.approve(
+            db, settings, settings.models_dir, promotion_id, annotator_id,
+            override=request.override, override_reason=request.override_reason,
+        )
         return _to_info(promotion)
     except model_promotion_service.NotModelReviewerError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except model_promotion_service.HardFailBlocksApprovalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except model_promotion_service.RejectedDecisionRequiresOverrideError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

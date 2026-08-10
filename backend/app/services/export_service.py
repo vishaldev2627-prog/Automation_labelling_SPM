@@ -388,7 +388,9 @@ class ExportService:
             try:
                 from app.services.detector_service import get_detector_service
 
-                auto_train_job_id = get_detector_service().start_training(trigger="export_handoff").job_id
+                auto_train_job_id = get_detector_service().start_training(
+                    trigger="export_handoff", dataset_snapshot_id=snapshot_id
+                ).job_id
             except Exception:
                 logger.exception("Could not auto-trigger training after snapshot %s", snapshot_id)
 

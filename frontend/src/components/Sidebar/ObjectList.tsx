@@ -138,6 +138,14 @@ export default function ObjectList() {
                 Propagated
               </span>
             )}
+            {o.mask_source === "detector" && (
+              <span
+                className="rounded-sm bg-blue-900/60 px-1 text-[10px] font-medium uppercase tracking-wide text-blue-300"
+                title="Outline predicted by the pre-labeler itself, not yet checked by SAM2 — click ↻ to refine with SAM2. Not eligible for auto-accept until then, regardless of confidence."
+              >
+                Detector mask
+              </span>
+            )}
             <span
               className={`h-1.5 w-1.5 rounded-full ${
                 o.status === "confirmed"

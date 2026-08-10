@@ -129,6 +129,36 @@ def get_fine_structure_flags(db: Session, dataset_key: str) -> dict[str, bool]:
     return {str(class_id): flag for class_id, flag in rows}
 
 
+def get_class_states(db: Session, dataset_key: str) -> dict[str, str]:
+    rows = db.execute(
+        select(DatasetClass.class_id, DatasetClass.state).where(DatasetClass.dataset_view == dataset_key)
+    ).all()
+    return {str(class_id): state for class_id, state in rows}
+
+
+def get_class_tiers(db: Session, dataset_key: str) -> dict[str, str]:
+    rows = db.execute(
+        select(DatasetClass.class_id, DatasetClass.tier).where(DatasetClass.dataset_view == dataset_key)
+    ).all()
+    return {str(class_id): tier for class_id, tier in rows}
+
+
+def get_ever_active_flags(db: Session, dataset_key: str) -> dict[str, bool]:
+    """True if a class is currently active, OR was deprecated (deprecated_at
+    is only ever set from mark_class_deprecated, which only ever fires from
+    'active' - see DatasetService.mark_class_deprecated's own validation).
+    Used by promotion_gate.py to route a reintroduced (previously-deprecated,
+    now newly-labeled) class through the new-class layer rather than the
+    common-class regression layer - its old production score is stale and
+    must never be read as a baseline."""
+    rows = db.execute(
+        select(DatasetClass.class_id, DatasetClass.state, DatasetClass.deprecated_at).where(
+            DatasetClass.dataset_view == dataset_key
+        )
+    ).all()
+    return {str(class_id): (state == "active" or deprecated_at is not None) for class_id, state, deprecated_at in rows}
+
+
 def set_class_safety_critical(db: Session, dataset_key: str, class_id: int, safety_critical: bool) -> bool:
     """Returns False if no row exists yet for this class (dataset never
     loaded far enough to sync it) - caller should treat that as not found,
@@ -140,7 +170,21 @@ def set_class_fine_structure(db: Session, dataset_key: str, class_id: int, fine_
     return _set_class_flag(db, dataset_key, class_id, fine_structure=fine_structure)
 
 
-def _set_class_flag(db: Session, dataset_key: str, class_id: int, **values: bool) -> bool:
+def set_class_state(db: Session, dataset_key: str, class_id: int, state: str) -> bool:
+    return _set_class_flag(db, dataset_key, class_id, state=state)
+
+
+def set_class_tier(db: Session, dataset_key: str, class_id: int, tier: str) -> bool:
+    return _set_class_flag(db, dataset_key, class_id, tier=tier)
+
+
+def mark_class_deprecated(db: Session, dataset_key: str, class_id: int, annotator_id: int | None) -> bool:
+    return _set_class_flag(
+        db, dataset_key, class_id, state="deprecated", deprecated_at=func.now(), deprecated_by_id=annotator_id
+    )
+
+
+def _set_class_flag(db: Session, dataset_key: str, class_id: int, **values) -> bool:
     result = db.execute(
         update(DatasetClass)
         .where(DatasetClass.dataset_view == dataset_key, DatasetClass.class_id == class_id)
@@ -206,10 +250,18 @@ def _upsert_class(
         color=color,
         safety_critical=safety_critical_if_new,
         fine_structure=fine_structure_if_new,
+        # A brand-new class always starts DISCOVERED/structural (see
+        # docs/mlflow_class_incremental_architecture.md §D) - never varies
+        # by class name the way safety_critical/fine_structure do, so no
+        # *_if_new parameter needed for these two.
+        state="discovered",
+        tier="structural",
     )
-    # safety_critical / fine_structure deliberately excluded from set_= :
-    # ON CONFLICT (an existing class) never touches them, only a brand-new row
-    # gets the *_if_new values - preserves whatever a curator already set.
+    # safety_critical / fine_structure / state / tier deliberately excluded
+    # from set_= : ON CONFLICT (an existing class) never touches them, only
+    # a brand-new row gets the *_if_new / lifecycle-default values -
+    # preserves whatever a curator already set, or whatever lifecycle state
+    # this class has already earned.
     stmt = stmt.on_conflict_do_update(
         constraint="uq_dataset_classes_view_class",
         set_={"name": stmt.excluded.name, "color": stmt.excluded.color},

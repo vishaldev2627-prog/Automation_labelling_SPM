@@ -109,6 +109,52 @@ def auto_load_dataset() -> None:
     if settings.model_promotion_poll_enabled:
         _start_model_promotion_poller()
 
+    if settings.eligibility_poll_enabled:
+        _start_eligibility_poller()
+
+
+def _start_eligibility_poller() -> None:
+    """Class-incremental promotion plan, Module 2: periodically recomputes
+    every view's class eligibility (discovered -> collecting_data ->
+    eligible - see class_eligibility_service.py) so a class that has
+    crossed the data-sufficiency floor becomes trainable (Module 3) without
+    anyone having to notice and flip a switch by hand. Same
+    daemon-thread-per-process shape as _start_model_promotion_poller - one
+    meaningful answer per view, not one per browser session.
+
+    Uses a standalone DatasetService per cycle per view (not the
+    session-scoped singleton) - this poller has no browser session to be
+    scoped to, exactly like the model-promotion poller below has no session
+    either.
+    """
+    import threading
+    from pathlib import Path
+
+    from app.routers.dataset import DATASET_VIEWS
+    from app.services import class_eligibility_service
+    from app.services.dataset_service import DatasetNotFoundError, DatasetService
+
+    def _poll_loop() -> None:
+        while True:
+            for view in DATASET_VIEWS:
+                view_path = Path(settings.dataset_path) / view.key
+                try:
+                    ds = DatasetService(settings)
+                    ds.load_dataset(str(view_path))
+                    changed = class_eligibility_service.recompute_and_apply(ds, settings)
+                    if changed:
+                        logger.info("Eligibility recompute for %s changed states: %s", view.key, changed)
+                except DatasetNotFoundError:
+                    pass  # this view doesn't exist on disk yet - nothing to recompute
+                except Exception:
+                    logger.exception("Eligibility recompute failed for %s; will retry next cycle", view.key)
+            time.sleep(settings.eligibility_poll_interval_seconds)
+
+    threading.Thread(target=_poll_loop, daemon=True).start()
+    logger.info(
+        "Started background class-eligibility poller (every %ds)", settings.eligibility_poll_interval_seconds
+    )
+
 
 def _start_model_promotion_poller() -> None:
     """M7.5: periodically checks MLflow's current Production version for
