@@ -47,22 +47,12 @@ assert old in s, 'patch pattern not found'; p.write_text(s.replace(old, new))" &
     pip3 install --no-cache-dir --no-build-isolation --no-deps --ignore-requires-python -e /app/sam2
 
 # Verify the CUDA torch and compatible torchvision are in place
-RUN python3 -c "
-import torch, torchvision, warnings
-warnings.filterwarnings('ignore')
-assert torch.cuda.is_available(), 'CUDA not available after torch restore'
-print('Build check OK: torch', torch.__version__, '/ CUDA', torch.version.cuda, '/ torchvision', torchvision.__version__)
-"
+RUN python3 -c "import torch, torchvision, warnings; warnings.filterwarnings('ignore'); assert torch.cuda.is_available(), 'CUDA not available after torch restore'; print('Build check OK: torch', torch.__version__, '/ CUDA', torch.version.cuda, '/ torchvision', torchvision.__version__)"
 
 # Pre-download MobileNetV3 weights into the image layer so the first request
 # is fast. The /data volume mounts over this on first run (weights persist
 # across deploys), but having them baked in means a cold container still works.
-RUN python3 -c "
-import warnings; warnings.filterwarnings('ignore')
-import torchvision.models as m
-m.mobilenet_v3_small(weights=m.MobileNet_V3_Small_Weights.IMAGENET1K_V1)
-print('MobileNetV3 weights pre-loaded')
-"
+RUN python3 -c "import warnings; warnings.filterwarnings('ignore'); import torchvision.models as m; m.mobilenet_v3_small(weights=m.MobileNet_V3_Small_Weights.IMAGENET1K_V1); print('MobileNetV3 weights pre-loaded')"
 
 COPY . .
 RUN chmod +x entrypoint.sh
