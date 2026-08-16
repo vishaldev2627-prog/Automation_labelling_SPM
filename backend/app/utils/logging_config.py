@@ -1,13 +1,14 @@
 """Centralized logging configuration."""
 from __future__ import annotations
 
+from typing import Optional
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
-def setup_logging(log_level: str = "INFO", log_file: str | None = None) -> None:
+def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> None:
     """Configure root logger with console + rotating file handlers."""
     level = getattr(logging, log_level.upper(), logging.INFO)
     fmt = logging.Formatter(

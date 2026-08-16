@@ -16,6 +16,7 @@ mocked here (same reasoning as test_golden_set.py staying DB-free).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 from app.models.schemas import ClassInfo
 from app.services.model_registry_service import _decide, registered_model_name
@@ -48,7 +49,7 @@ class _FakeRun:
 
 
 class _FakeClient:
-    def __init__(self, production_version: "_FakeModelVersion | None", run_metrics: dict[str, float]) -> None:
+    def __init__(self, production_version: Optional["_FakeModelVersion"], run_metrics: dict[str, float]) -> None:
         self._production_version = production_version
         self._run_metrics = run_metrics
 

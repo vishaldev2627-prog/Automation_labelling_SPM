@@ -20,6 +20,7 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 from app.models.schemas import ClassInfo
 from app.services.dataset_service import DatasetNotFoundError
@@ -35,7 +36,7 @@ from app.utils.file_utils import atomic_write_json, read_json
 class FakeDatasetService:
     """Minimal stand-in for the two DatasetService members DetectorService uses."""
 
-    key: str | None
+    key: Optional[str]
     classes: list[str] = field(default_factory=list)
 
     @property
@@ -53,7 +54,7 @@ class FakeDatasetService:
         ]
 
 
-def _svc(models_dir: Path, key: str | None, classes: list[str]) -> DetectorService:
+def _svc(models_dir: Path, key: Optional[str], classes: list[str]) -> DetectorService:
     return DetectorService(FakeDatasetService(key, classes), models_dir)
 
 

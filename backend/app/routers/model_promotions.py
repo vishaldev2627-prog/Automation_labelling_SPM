@@ -8,6 +8,8 @@ seeing that a promotion is pending, only in deciding it.
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 
 from app.config import get_settings
@@ -41,7 +43,7 @@ def _to_info(promotion) -> ModelPromotionInfo:
 
 
 @router.get("/pending", response_model=list[ModelPromotionInfo])
-def list_pending(dataset_view: str | None = None) -> list[ModelPromotionInfo]:
+def list_pending(dataset_view: Optional[str] = None) -> list[ModelPromotionInfo]:
     db = SessionLocal()
     try:
         return [_to_info(p) for p in repo.list_pending(db, dataset_view)]
@@ -50,7 +52,7 @@ def list_pending(dataset_view: str | None = None) -> list[ModelPromotionInfo]:
 
 
 @router.get("/history", response_model=list[ModelPromotionInfo])
-def list_history(dataset_view: str | None = None, limit: int = 50) -> list[ModelPromotionInfo]:
+def list_history(dataset_view: Optional[str] = None, limit: int = 50) -> list[ModelPromotionInfo]:
     db = SessionLocal()
     try:
         return [_to_info(p) for p in repo.list_history(db, dataset_view, limit)]

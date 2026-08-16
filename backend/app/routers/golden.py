@@ -8,6 +8,8 @@ to write to it.
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.config import get_settings
@@ -25,7 +27,7 @@ from app.session_context import get_current_annotator
 router = APIRouter(prefix="/api/golden", tags=["golden"])
 
 
-def _to_info(db, golden_set, item_count: int | None = None) -> GoldenSetInfo:
+def _to_info(db, golden_set, item_count: Optional[int] = None) -> GoldenSetInfo:
     return GoldenSetInfo(
         id=golden_set.id,
         dataset_view=golden_set.dataset_view,
@@ -101,7 +103,7 @@ def create_set(request: CreateGoldenSetRequest) -> GoldenSetInfo:
 
 
 @router.get("/sets", response_model=list[GoldenSetInfo])
-def list_sets(dataset_view: str | None = None) -> list[GoldenSetInfo]:
+def list_sets(dataset_view: Optional[str] = None) -> list[GoldenSetInfo]:
     db = SessionLocal()
     try:
         return [_to_info(db, v) for v in golden_repo.list_versions(db, dataset_view)]

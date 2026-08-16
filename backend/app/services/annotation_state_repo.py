@@ -178,7 +178,7 @@ def set_class_tier(db: Session, dataset_key: str, class_id: int, tier: str) -> b
     return _set_class_flag(db, dataset_key, class_id, tier=tier)
 
 
-def mark_class_deprecated(db: Session, dataset_key: str, class_id: int, annotator_id: int | None) -> bool:
+def mark_class_deprecated(db: Session, dataset_key: str, class_id: int, annotator_id: Optional[int]) -> bool:
     return _set_class_flag(
         db, dataset_key, class_id, state="deprecated", deprecated_at=func.now(), deprecated_by_id=annotator_id
     )
@@ -200,7 +200,7 @@ def save_colors_bulk(
     classes: list[str],
     colors: dict[str, str],
     default_safety: dict[str, bool],
-    default_fine_structure: dict[str, bool] | None = None,
+    default_fine_structure: Optional[dict] = None,
 ) -> None:
     """Upsert one row per (dataset_key, class_id) - mirrors the old
     `_save_meta()` full-rewrite, just as N upserts instead of one file write.

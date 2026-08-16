@@ -25,6 +25,7 @@ click at the wrong moment.
 """
 from __future__ import annotations
 
+from typing import Optional
 import threading
 import time
 from contextlib import contextmanager
@@ -59,7 +60,7 @@ def track_inference():
             _last_activity_at = time.monotonic()
 
 
-def is_gpu_busy(now: float | None = None) -> bool:
+def is_gpu_busy(now: Optional[float] = None) -> bool:
     """True if inference is in flight right now, or finished within the
     last `RECENT_ACTIVITY_WINDOW_SECONDS`. `now` is injectable for tests -
     real callers never need to pass it."""
