@@ -54,6 +54,13 @@ mlflow-skinny==2.16.2
 # Left commented here because it is not a standard PyPI package name across versions.
 # sam-2
 
+# SAM2 runtime deps that are skipped by --no-deps on Jetson (we use --no-deps
+# to avoid sam2's torch>=2.5.1 guard, but hydra-core and iopath are pure
+# Python and must be installed explicitly so `from sam2.build_sam import ...`
+# doesn't fail with ModuleNotFoundError: No module named 'hydra'.
+hydra-core>=1.3.2
+iopath
+
 # Optional ONNX runtime backend (CPU or GPU) if SAM_USE_ONNX=true in .env
 # No aarch64 wheel is published for this pin, so it's restricted to x86_64 hosts.
 onnxruntime-gpu==1.19.2 ; sys_platform == "linux" and platform_machine == "x86_64"
