@@ -8,7 +8,7 @@ permission gate) built on top of it.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -64,14 +64,14 @@ def get(db: Session, promotion_id: int) -> Optional[ModelPromotion]:
     return db.execute(select(ModelPromotion).where(ModelPromotion.id == promotion_id)).scalar_one_or_none()
 
 
-def list_pending(db: Session, dataset_view: Optional[str] = None) -> list[ModelPromotion]:
+def list_pending(db: Session, dataset_view: Optional[str] = None) -> List[ModelPromotion]:
     query = select(ModelPromotion).where(ModelPromotion.status == "pending").order_by(ModelPromotion.created_at)
     if dataset_view is not None:
         query = query.where(ModelPromotion.dataset_view == dataset_view)
     return list(db.execute(query).scalars())
 
 
-def list_history(db: Session, dataset_view: Optional[str] = None, limit: int = 50) -> list[ModelPromotion]:
+def list_history(db: Session, dataset_view: Optional[str] = None, limit: int = 50) -> List[ModelPromotion]:
     query = select(ModelPromotion).order_by(ModelPromotion.created_at.desc()).limit(limit)
     if dataset_view is not None:
         query = query.where(ModelPromotion.dataset_view == dataset_view)

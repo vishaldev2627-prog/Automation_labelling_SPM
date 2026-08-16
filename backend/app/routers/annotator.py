@@ -12,6 +12,7 @@ this identity system - it's groundwork for these permission checks, not a
 security boundary today.
 """
 from __future__ import annotations
+from typing import List
 
 from fastapi import APIRouter, HTTPException
 
@@ -57,8 +58,8 @@ def identify(payload: IdentifyRequest) -> AnnotatorIdentity:
     return AnnotatorIdentity(id=annotator.id, name=annotator.name, role=annotator.role)
 
 
-@router.get("", response_model=list[AnnotatorIdentity])
-def list_all() -> list[AnnotatorIdentity]:
+@router.get("", response_model=List[AnnotatorIdentity])
+def list_all() -> List[AnnotatorIdentity]:
     db = SessionLocal()
     try:
         annotators = list_annotators(db)

@@ -16,6 +16,7 @@ in the data.
     cd backend && python -m tests.test_condition_labels   # no pytest
 """
 from __future__ import annotations
+from typing import List
 
 from app.models.schemas import (
     AnnotationObject,
@@ -123,7 +124,7 @@ def test_unrecognised_condition_does_not_validate() -> None:
 
 # ------------------------------------------------------- crop-export selection
 
-def _selected_for_export(objects: list[AnnotationObject]) -> list[AnnotationObject]:
+def _selected_for_export(objects: List[AnnotationObject]) -> List[AnnotationObject]:
     """Mirror of export_service._write_condition_crops' selection rule."""
     return [o for o in objects if o.status != ObjectStatus.REJECTED and o.condition is not None]
 

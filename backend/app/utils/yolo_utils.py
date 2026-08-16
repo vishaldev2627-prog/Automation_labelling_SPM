@@ -1,5 +1,6 @@
 """YOLO detection/segmentation label parsing and writing."""
 from __future__ import annotations
+from typing import List, Tuple
 
 import logging
 from pathlib import Path
@@ -13,13 +14,13 @@ class LabelParseError(Exception):
     """Raised when a YOLO label file/line is malformed."""
 
 
-def parse_detection_label_file(path: Path) -> list[tuple[int, BoundingBox]]:
+def parse_detection_label_file(path: Path) -> List[Tuple[int, BoundingBox]]:
     """Parse a YOLO detection .txt file into (class_id, bbox) tuples.
 
     Malformed lines are skipped with a logged warning rather than aborting
     the whole file, since a single bad line shouldn't block the dataset.
     """
-    results: list[tuple[int, BoundingBox]] = []
+    results: List[Tuple[int, BoundingBox]] = []
     if not path.exists():
         return results
 
@@ -48,12 +49,12 @@ def parse_detection_label_file(path: Path) -> list[tuple[int, BoundingBox]]:
     return results
 
 
-def format_segmentation_line(class_id: int, polygon: list[Point]) -> str:
+def format_segmentation_line(class_id: int, polygon: List[Point]) -> str:
     coords = " ".join(f"{p.x:.6f} {p.y:.6f}" for p in polygon)
     return f"{class_id} {coords}"
 
 
-def write_segmentation_label_file(path: Path, objects: list[tuple[int, list[Point]]]) -> None:
+def write_segmentation_label_file(path: Path, objects: List[Tuple[int, List[Point]]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         format_segmentation_line(class_id, polygon)
@@ -63,7 +64,7 @@ def write_segmentation_label_file(path: Path, objects: list[tuple[int, list[Poin
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-def load_class_names(dataset_dir: Path, num_fallback_classes: int = 0) -> list[str]:
+def load_class_names(dataset_dir: Path, num_fallback_classes: int = 0) -> List[str]:
     """Load class names from data.yaml or classes.txt, falling back to generic names."""
     for candidate in ("data.yaml", "data.yml", "dataset.yaml"):
         yaml_path = dataset_dir / candidate

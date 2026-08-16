@@ -9,6 +9,7 @@ test->doc 1:1.
     cd backend && python -m tests.test_promotion_gate   # no pytest
 """
 from __future__ import annotations
+from typing import Dict
 
 from app.services.promotion_gate import (
     ClassMetrics,
@@ -34,7 +35,7 @@ THRESHOLDS = PromotionThresholds(
 NO_OPERATIONAL_ISSUES = OperationalMetrics(latency_p95_ms=100.0, model_size_mb=20.0, false_positive_rate={})
 
 
-def _registry(tiers: dict[int, str], states: dict[int, str] = None, ever_active: dict[int, bool] = None):
+def _registry(tiers: Dict[int, str], states: Dict[int, str] = None, ever_active: Dict[int, bool] = None):
     states = states or {}
     ever_active = ever_active or {}
     return ClassRegistryView(
@@ -45,7 +46,7 @@ def _registry(tiers: dict[int, str], states: dict[int, str] = None, ever_active:
     )
 
 
-def _metrics(ap50s: dict[int, float], n_val: int = 20) -> ModelVersionMetrics:
+def _metrics(ap50s: Dict[int, float], n_val: int = 20) -> ModelVersionMetrics:
     return ModelVersionMetrics(
         per_class={cid: ClassMetrics(class_id=cid, ap50=ap, n_val_instances=n_val) for cid, ap in ap50s.items()}
     )

@@ -38,6 +38,7 @@ seeing that list. Nothing in this module marks anything completed on a
 timer, a schedule, or a dataset load.
 """
 from __future__ import annotations
+from typing import List, Set
 
 import time
 
@@ -57,7 +58,7 @@ MIN_APPROVAL_RATE = 1.0  # zero tolerated rejections in that sample - conservati
 CANDIDATE_LIMIT = 200
 
 
-def _object_is_acceptable(obj: dict, eligible_class_ids: set[int]) -> bool:
+def _object_is_acceptable(obj: dict, eligible_class_ids: Set[int]) -> bool:
     """One object clears the bar: eligible class, detector sure of the class,
     a SAM2-produced mask SAM2 is sure of. Missing detector confidence, or a
     mask that isn't SAM2's (e.g. still just the Option B detector-predicted
@@ -84,12 +85,12 @@ def _object_is_acceptable(obj: dict, eligible_class_ids: set[int]) -> bool:
     return obj.get("mask_confidence", 0.0) >= MASK_CONFIDENCE_THRESHOLD
 
 
-def eligible_class_ids(db: Session, ds: DatasetService) -> set[int]:
+def eligible_class_ids(db: Session, ds: DatasetService) -> Set[int]:
     """Classes that clear the conservative bar: not safety-critical, and a
     proven zero-rejection audit track record over a minimum sample size."""
     stats = review_service.get_class_audit_stats(db, ds)
     classes_by_id = {c.class_id: c for c in ds.get_classes()}
-    eligible: set[int] = set()
+    eligible: Set[int] = set()
     for class_id_str, entry in stats.items():
         class_id = int(class_id_str)
         cls = classes_by_id.get(class_id)
@@ -103,7 +104,7 @@ def eligible_class_ids(db: Session, ds: DatasetService) -> set[int]:
     return eligible
 
 
-def find_candidates(db: Session, ds: DatasetService, limit: int = CANDIDATE_LIMIT) -> list[TriageItem]:
+def find_candidates(db: Session, ds: DatasetService, limit: int = CANDIDATE_LIMIT) -> List[TriageItem]:
     """Not-yet-completed images where every object is a high-confidence
     instance of an eligible class. Preview only - does not mark anything
     completed; see bulk_accept()."""
@@ -129,7 +130,7 @@ def find_candidates(db: Session, ds: DatasetService, limit: int = CANDIDATE_LIMI
     return candidates
 
 
-def bulk_accept(db: Session, ds: DatasetService, image_ids: list[str]) -> int:
+def bulk_accept(db: Session, ds: DatasetService, image_ids: List[str]) -> int:
     """Marks each image completed, attributed to the reserved system
     identity (never impersonating whoever's logged in), and records an
     approving review so it's immediately export-eligible - the whole point

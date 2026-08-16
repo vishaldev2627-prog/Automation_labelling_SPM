@@ -15,7 +15,7 @@ must not be lost to a transient MinIO outage.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -69,7 +69,7 @@ def propose_candidates(
     target_count: int,
     min_per_class: int,
     treat_all_labeled_as_reviewed: bool = False,
-) -> list[str]:
+) -> List[str]:
     """Read-only: assemble this view's real data and run it through
     `golden_selection.propose_golden_candidates`. Never writes to
     `golden_sets`/`golden_set_items` - a curator still has to call
@@ -99,7 +99,7 @@ def propose_candidates(
     reviewed_ids = review_service.get_reviewed_image_ids(db, ds.dataset_key, "second_review")
     safety_critical_ids = frozenset(c.class_id for c in ds.get_classes() if c.safety_critical)
 
-    summaries: list[ImageLabelSummary] = []
+    summaries: List[ImageLabelSummary] = []
     for image_id in image_ids:
         annotations = ds.get_annotations(image_id)
         class_ids = frozenset(
@@ -133,9 +133,9 @@ def add_items(
     ds: DatasetService,
     *,
     golden_set_id: int,
-    image_ids: list[str],
+    image_ids: List[str],
     annotator_id: Optional[int],
-) -> list[AddItemResult]:
+) -> List[AddItemResult]:
     """Freeze each image's current annotations into the golden set.
 
     A frozen label reflects this image's state *right now* - the same
@@ -149,7 +149,7 @@ def add_items(
     if golden_set is None:
         raise LookupError(f"No golden set version with id {golden_set_id}")
 
-    results: list[AddItemResult] = []
+    results: List[AddItemResult] = []
     for image_id in image_ids:
         annotations = ds.get_annotations(image_id)
         objects = [

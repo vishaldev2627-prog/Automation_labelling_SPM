@@ -38,7 +38,7 @@ import logging
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ MANIFEST_SCHEMA_VERSION = 1
 #                     unwrap is not built yet, so this is declared but unfed.
 #   buffer         -> D-Q2: buffer_visible, annotated as boxes, flag derived here.
 # Names match FINAL_AIML_ARCHITECTURE §10's `models:` block.
-VIEW_TARGET_FAMILIES: dict[str, list[str]] = {
+VIEW_TARGET_FAMILIES: Dict[str, List[str]] = {
     "side_view": ["p1_side_damage"],
     "underbelly": ["p2_under_anomaly", "p2_under_crackseg"],
     "wheel_shelling": ["p3_wheel_shelling"],
@@ -80,7 +80,7 @@ def file_sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
-def build_file_index(root: Path) -> list[tuple[str, str, int]]:
+def build_file_index(root: Path) -> List[Tuple[str, str, int]]:
     """Every data file under `root` as (posix relative path, sha256, size).
 
     Sorted by path so the ordering is reproducible across filesystems - `rglob`
@@ -90,7 +90,7 @@ def build_file_index(root: Path) -> list[tuple[str, str, int]]:
     Paths are stored posix-style for the same reason: a snapshot built on
     Windows and one built on Linux from identical data must hash identically.
     """
-    entries: list[tuple[str, str, int]] = []
+    entries: List[Tuple[str, str, int]] = []
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
         relative = path.relative_to(root).as_posix()
         if relative in NON_DATA_FILES:
@@ -100,7 +100,7 @@ def build_file_index(root: Path) -> list[tuple[str, str, int]]:
     return entries
 
 
-def compute_snapshot_id(file_index: list[tuple[str, str, int]], class_map_hash: Optional[str]) -> str:
+def compute_snapshot_id(file_index: List[Tuple[str, str, int]], class_map_hash: Optional[str]) -> str:
     """sha256 over the file set plus the class-map hash. See the module docstring
     for what is deliberately excluded.
 
@@ -119,7 +119,7 @@ def compute_snapshot_id(file_index: list[tuple[str, str, int]], class_map_hash: 
     return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def write_checksums(root: Path, file_index: list[tuple[str, str, int]]) -> None:
+def write_checksums(root: Path, file_index: List[Tuple[str, str, int]]) -> None:
     """Standard `sha256sum`-compatible file, so the pipeline team can verify a
     transferred snapshot with `sha256sum -c` and no tooling from us."""
     lines = [f"{digest}  {relative}" for relative, digest, _size in file_index]
@@ -132,10 +132,10 @@ def build_manifest(
     dataset_key: str,
     class_map_version: Optional[int],
     class_map_hash: Optional[str],
-    class_names: list[str],
-    exclude_classes: list[str],
-    label_format: dict[int, str],
-    file_index: list[tuple[str, str, int]],
+    class_names: List[str],
+    exclude_classes: List[str],
+    label_format: Dict[int, str],
+    file_index: List[Tuple[str, str, int]],
     stats: dict,
 ) -> dict:
     """The handoff contract. Field names are ours to define (D-Q6).
@@ -218,7 +218,7 @@ def new_staging_dir(exports_dir: Path) -> Path:
     return staging
 
 
-def finalize(staging_dir: Path, exports_dir: Path, snapshot_id: str) -> tuple[Path, bool]:
+def finalize(staging_dir: Path, exports_dir: Path, snapshot_id: str) -> Tuple[Path, bool]:
     """Move a staged build to its content-addressed home.
 
     Returns `(path, created)`. `created=False` means this exact snapshot already

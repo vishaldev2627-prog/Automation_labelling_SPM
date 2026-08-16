@@ -20,6 +20,7 @@ the selection *rule* is what needs to be tested and trusted, and it should be
 testable without standing up a database.
 """
 from __future__ import annotations
+from typing import FrozenSet, List, Set
 
 import random
 from dataclasses import dataclass
@@ -32,17 +33,17 @@ class ImageLabelSummary:
     the actual DB/filesystem work."""
 
     image_id: str
-    class_ids: frozenset[int]
+    class_ids: FrozenSet[int]
     reviewed: bool
 
 
 def propose_golden_candidates(
-    images: list[ImageLabelSummary],
-    safety_critical_class_ids: frozenset[int],
+    images: List[ImageLabelSummary],
+    safety_critical_class_ids: FrozenSet[int],
     target_count: int,
     min_per_class: int,
     seed: int = 42,
-) -> list[str]:
+) -> List[str]:
     """Propose a stratified, deterministic golden-set candidate list.
 
     Only draws from `reviewed=True` images - unreviewed images are excluded
@@ -83,7 +84,7 @@ def propose_golden_candidates(
     rng.shuffle(pool)  # tie-break order for the greedy pass and the fill pass alike
 
     needs = {class_id: min_per_class for class_id in all_class_ids}
-    selected: set[str] = set()
+    selected: Set[str] = set()
 
     def _coverage_score(img: ImageLabelSummary) -> int:
         return sum(

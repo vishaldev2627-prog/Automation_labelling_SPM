@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import List, Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -263,11 +263,11 @@ class Settings(BaseSettings):
         return self.dataset_dir / self.state_dir_name
 
     @property
-    def cors_origin_list(self) -> list[str]:
+    def cors_origin_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
-    def exclude_class_list(self) -> list[str]:
+    def exclude_class_list(self) -> List[str]:
         return [c.strip() for c in self.exclude_classes.split(",") if c.strip()]
 
     def is_excluded_class(self, name: str) -> bool:

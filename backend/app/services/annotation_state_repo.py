@@ -15,7 +15,7 @@ should always win-on-latest rather than "first write wins".
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Dict, List, Optional, Set
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -33,7 +33,7 @@ def get_state(db: Session, dataset_key: str, image_id: str) -> Optional[dict]:
     return row
 
 
-def get_states_bulk(db: Session, dataset_key: str, image_ids: list[str]) -> dict[str, dict]:
+def get_states_bulk(db: Session, dataset_key: str, image_ids: List[str]) -> Dict[str, dict]:
     """Batch equivalent of get_state - one query instead of one per image,
     for list_images()/get_dataset_info() which need every image's state."""
     if not image_ids:
@@ -86,7 +86,7 @@ def save_state(
     db.commit()
 
 
-def get_updated_by_ids(db: Session, dataset_key: str, image_ids: list[str]) -> set[int]:
+def get_updated_by_ids(db: Session, dataset_key: str, image_ids: List[str]) -> Set[int]:
     """Distinct annotators who last saved any of these images.
 
     Feeds the snapshot manifest's `provenance.annotator_ids`, so a dataset can be
@@ -106,21 +106,21 @@ def get_updated_by_ids(db: Session, dataset_key: str, image_ids: list[str]) -> s
     return {row[0] for row in rows}
 
 
-def get_colors(db: Session, dataset_key: str) -> dict[str, str]:
+def get_colors(db: Session, dataset_key: str) -> Dict[str, str]:
     rows = db.execute(
         select(DatasetClass.class_id, DatasetClass.color).where(DatasetClass.dataset_view == dataset_key)
     ).all()
     return {str(class_id): color for class_id, color in rows}
 
 
-def get_safety_flags(db: Session, dataset_key: str) -> dict[str, bool]:
+def get_safety_flags(db: Session, dataset_key: str) -> Dict[str, bool]:
     rows = db.execute(
         select(DatasetClass.class_id, DatasetClass.safety_critical).where(DatasetClass.dataset_view == dataset_key)
     ).all()
     return {str(class_id): flag for class_id, flag in rows}
 
 
-def get_fine_structure_flags(db: Session, dataset_key: str) -> dict[str, bool]:
+def get_fine_structure_flags(db: Session, dataset_key: str) -> Dict[str, bool]:
     rows = db.execute(
         select(DatasetClass.class_id, DatasetClass.fine_structure).where(
             DatasetClass.dataset_view == dataset_key
@@ -129,21 +129,21 @@ def get_fine_structure_flags(db: Session, dataset_key: str) -> dict[str, bool]:
     return {str(class_id): flag for class_id, flag in rows}
 
 
-def get_class_states(db: Session, dataset_key: str) -> dict[str, str]:
+def get_class_states(db: Session, dataset_key: str) -> Dict[str, str]:
     rows = db.execute(
         select(DatasetClass.class_id, DatasetClass.state).where(DatasetClass.dataset_view == dataset_key)
     ).all()
     return {str(class_id): state for class_id, state in rows}
 
 
-def get_class_tiers(db: Session, dataset_key: str) -> dict[str, str]:
+def get_class_tiers(db: Session, dataset_key: str) -> Dict[str, str]:
     rows = db.execute(
         select(DatasetClass.class_id, DatasetClass.tier).where(DatasetClass.dataset_view == dataset_key)
     ).all()
     return {str(class_id): tier for class_id, tier in rows}
 
 
-def get_ever_active_flags(db: Session, dataset_key: str) -> dict[str, bool]:
+def get_ever_active_flags(db: Session, dataset_key: str) -> Dict[str, bool]:
     """True if a class is currently active, OR was deprecated (deprecated_at
     is only ever set from mark_class_deprecated, which only ever fires from
     'active' - see DatasetService.mark_class_deprecated's own validation).
@@ -197,9 +197,9 @@ def _set_class_flag(db: Session, dataset_key: str, class_id: int, **values) -> b
 def save_colors_bulk(
     db: Session,
     dataset_key: str,
-    classes: list[str],
-    colors: dict[str, str],
-    default_safety: dict[str, bool],
+    classes: List[str],
+    colors: Dict[str, str],
+    default_safety: Dict[str, bool],
     default_fine_structure: Optional[dict] = None,
 ) -> None:
     """Upsert one row per (dataset_key, class_id) - mirrors the old

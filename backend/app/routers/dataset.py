@@ -1,5 +1,6 @@
 """Dataset loading and info endpoints."""
 from __future__ import annotations
+from typing import List
 
 import logging
 from pathlib import Path
@@ -36,8 +37,8 @@ DATASET_VIEWS = [
 _VIEW_KEYS = {v.key for v in DATASET_VIEWS}
 
 
-@router.get("/views", response_model=list[DatasetView])
-def list_dataset_views() -> list[DatasetView]:
+@router.get("/views", response_model=List[DatasetView])
+def list_dataset_views() -> List[DatasetView]:
     return DATASET_VIEWS
 
 
@@ -80,8 +81,8 @@ def dataset_info() -> DatasetInfo:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/classes", response_model=list[ClassInfo])
-def get_classes() -> list[ClassInfo]:
+@router.get("/classes", response_model=List[ClassInfo])
+def get_classes() -> List[ClassInfo]:
     try:
         return get_dataset_service().get_classes()
     except DatasetNotFoundError as exc:
@@ -138,8 +139,8 @@ def get_class_map() -> ClassMapVersionInfo:
         db.close()
 
 
-@router.get("/class-map/versions", response_model=list[ClassMapVersionInfo])
-def list_class_map_versions() -> list[ClassMapVersionInfo]:
+@router.get("/class-map/versions", response_model=List[ClassMapVersionInfo])
+def list_class_map_versions() -> List[ClassMapVersionInfo]:
     """Full history, oldest first. Versions are immutable and never deleted, so
     this is the audit trail for class-map drift - the thing that was missing when
     this project went through its 27-class remap."""

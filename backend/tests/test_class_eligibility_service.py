@@ -10,6 +10,7 @@ plain dataclasses/fakes - no Postgres needed for any of this file.
     cd backend && python -m tests.test_class_eligibility_service   # no pytest
 """
 from __future__ import annotations
+from typing import Dict, List, Tuple
 
 from app.config import get_settings
 from app.models.schemas import ClassInfo
@@ -108,18 +109,18 @@ class _FakeDatasetService:
     recompute_and_apply use - image_ids, get_saved_states, get_classes,
     set_class_state, dataset_key."""
 
-    def __init__(self, states: dict[str, dict], classes: list[ClassInfo]) -> None:
+    def __init__(self, states: Dict[str, dict], classes: List[ClassInfo]) -> None:
         self._states = states
         self._classes = classes
-        self.set_calls: list[tuple[int, str]] = []
+        self.set_calls: List[Tuple[int, str]] = []
 
-    def image_ids(self) -> list[str]:
+    def image_ids(self) -> List[str]:
         return list(self._states.keys())
 
-    def get_saved_states(self, image_ids: list[str]) -> dict[str, dict]:
+    def get_saved_states(self, image_ids: List[str]) -> Dict[str, dict]:
         return {i: self._states[i] for i in image_ids if i in self._states}
 
-    def get_classes(self) -> list[ClassInfo]:
+    def get_classes(self) -> List[ClassInfo]:
         return self._classes
 
     def set_class_state(self, class_id: int, state: str) -> None:

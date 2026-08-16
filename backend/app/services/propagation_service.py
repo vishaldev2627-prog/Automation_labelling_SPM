@@ -13,6 +13,7 @@ Only ever writes into images no human has reviewed yet (see
 `_is_untouched`), so it can never clobber someone else's in-progress work.
 """
 from __future__ import annotations
+from typing import List
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -96,7 +97,7 @@ class PropagationService:
             except Exception:
                 logger.exception("Propagation from %s to %s failed", source_id, neighbor.image_id)
 
-    def _propagate_to(self, source_id: str, seed_objects: list[AnnotationObject], target_id: str) -> None:
+    def _propagate_to(self, source_id: str, seed_objects: List[AnnotationObject], target_id: str) -> None:
         if target_id == source_id:
             return
         # M4: a golden image is the ruler nothing trains on - it must never
@@ -114,7 +115,7 @@ class PropagationService:
         if not _is_untouched(target):
             return
 
-        new_objects: list[AnnotationObject] = []
+        new_objects: List[AnnotationObject] = []
         for src in seed_objects:
             # detector_confidence is deliberately NOT carried over from the
             # source object: no detector ran on *this* image, so there is no

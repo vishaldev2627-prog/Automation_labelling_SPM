@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -68,7 +68,7 @@ class InsufficientGoldenCoverageError(Exception):
     every uncovered class at once (not just the first), mirroring
     should_promote()'s own "collect every failing check" philosophy."""
 
-    def __init__(self, class_ids: list[int]) -> None:
+    def __init__(self, class_ids: List[int]) -> None:
         self.class_ids = class_ids
         super().__init__(
             f"Class(es) {class_ids} have zero golden-set coverage - cannot evaluate them meaningfully. "
@@ -77,8 +77,8 @@ class InsufficientGoldenCoverageError(Exception):
 
 
 def _assemble_golden_dataset(
-    ds: DatasetService, golden_image_ids: set[str], staging_dir: Path, classes: list[str]
-) -> tuple[Path, int, dict[int, int]]:
+    ds: DatasetService, golden_image_ids: Set[str], staging_dir: Path, classes: List[str]
+) -> Tuple[Path, int, Dict[int, int]]:
     """Write a YOLO-**segmentation** "val-only" dataset from the golden set's
     *current* annotation state.
 
@@ -102,7 +102,7 @@ def _assemble_golden_dataset(
     lbl_dir.mkdir(parents=True, exist_ok=True)
 
     written = 0
-    instance_counts: dict[int, int] = {}
+    instance_counts: Dict[int, int] = {}
     for image_id in sorted(golden_image_ids):
         try:
             annotations = ds.get_annotations(image_id)
@@ -139,11 +139,11 @@ def _assemble_golden_dataset(
 
 def _compute_fp_fn(
     ds: DatasetService,
-    golden_image_ids: set[str],
+    golden_image_ids: Set[str],
     model,
     confidence_threshold: float,
     iou_threshold: float,
-) -> dict[int, dict[str, float]]:
+) -> Dict[int, Dict[str, float]]:
     """Per-class false_positive_rate/false_negative_rate at a FIXED serving
     confidence threshold - deliberately not the AP curve's implicit sweep,
     since that isn't the number that matters operationally
@@ -161,7 +161,7 @@ def _compute_fp_fn(
     """
     from app.models.schemas import Point
 
-    counts: dict[int, dict[str, int]] = {}
+    counts: Dict[int, Dict[str, int]] = {}
 
     def _bump(class_id: int, key: str) -> None:
         counts.setdefault(class_id, {"tp": 0, "fp": 0, "fn": 0})[key] += 1
@@ -172,7 +172,7 @@ def _compute_fp_fn(
         except Exception:
             continue
         width, height = annotations.width, annotations.height
-        gt_by_class: dict[int, list] = {}
+        gt_by_class: Dict[int, list] = {}
         for obj in annotations.objects:
             if obj.status == ObjectStatus.REJECTED or len(obj.polygon) < 3:
                 continue
@@ -195,7 +195,7 @@ def _compute_fp_fn(
 
         result = results[0]
         mask_polys = result.masks.xyn if result.masks is not None else None
-        pred_by_class: dict[int, list[tuple[float, int]]] = {}
+        pred_by_class: Dict[int, List[Tuple[float, int]]] = {}
         for idx, box in enumerate(result.boxes):
             pred_by_class.setdefault(int(box.cls.item()), []).append((float(box.conf.item()), idx))
 
@@ -225,7 +225,7 @@ def _compute_fp_fn(
                 if not matched:
                     _bump(class_id, "fn")
 
-    rates: dict[int, dict[str, float]] = {}
+    rates: Dict[int, Dict[str, float]] = {}
     for class_id, c in counts.items():
         tp, fp, fn = c["tp"], c["fp"], c["fn"]
         rates[class_id] = {
@@ -237,11 +237,11 @@ def _compute_fp_fn(
 
 def evaluate_on_golden_set(
     ds: DatasetService,
-    golden_image_ids: set[str],
+    golden_image_ids: Set[str],
     model_path: Path,
-    classes: list[str],
+    classes: List[str],
     staging_root: Path,
-    candidate_class_ids: Optional[set[int]] = None,
+    candidate_class_ids: Optional[Set[int]] = None,
 ) -> Optional[dict]:
     """Run the trained model against the golden set and return per-class +
     aggregate metrics. Returns None (logged, not raised) if the golden set
@@ -289,7 +289,7 @@ def evaluate_on_golden_set(
         # alongside for continuity with dashboards built against pre-seg
         # runs, never as the primary number going forward - see this
         # module's docstring.
-        per_class: dict[int, dict[str, float]] = {}
+        per_class: Dict[int, Dict[str, float]] = {}
         for i, class_id in enumerate(results.ap_class_index):
             box_p, box_r, box_map50, box_map = results.box.class_result(i)
             seg_p, seg_r, seg_map50, seg_map = results.seg.class_result(i)

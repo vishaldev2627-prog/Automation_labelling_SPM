@@ -1,5 +1,6 @@
 """Image listing, serving and annotation retrieval/save endpoints."""
 from __future__ import annotations
+from typing import List
 
 import logging
 
@@ -21,8 +22,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/images", tags=["images"])
 
 
-@router.get("", response_model=list[ImageListItem])
-def list_images() -> list[ImageListItem]:
+@router.get("", response_model=List[ImageListItem])
+def list_images() -> List[ImageListItem]:
     try:
         return get_dataset_service().list_images()
     except DatasetNotFoundError as exc:

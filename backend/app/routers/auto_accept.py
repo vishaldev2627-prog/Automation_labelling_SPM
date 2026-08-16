@@ -4,6 +4,7 @@ review: GET only ever previews, POST only ever acts on an explicit list a
 caller chose after seeing that preview - nothing here runs automatically.
 """
 from __future__ import annotations
+from typing import List
 
 from fastapi import APIRouter, HTTPException
 
@@ -15,8 +16,8 @@ from app.services.dataset_service import DatasetNotFoundError, get_dataset_servi
 router = APIRouter(prefix="/api/auto-accept", tags=["auto-accept"])
 
 
-@router.get("/candidates", response_model=list[TriageItem])
-def get_candidates() -> list[TriageItem]:
+@router.get("/candidates", response_model=List[TriageItem])
+def get_candidates() -> List[TriageItem]:
     ds = get_dataset_service()
     db = SessionLocal()
     try:

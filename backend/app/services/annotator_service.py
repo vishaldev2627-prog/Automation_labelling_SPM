@@ -4,6 +4,7 @@ attached to the current session, and app.models.db_models.Annotator for the
 table this reads/writes.
 """
 from __future__ import annotations
+from typing import List
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -39,7 +40,7 @@ def get_or_create_annotator(db: Session, name: str) -> Annotator:
     return annotator
 
 
-def list_annotators(db: Session) -> list[Annotator]:
+def list_annotators(db: Session) -> List[Annotator]:
     return db.query(Annotator).order_by(Annotator.name).all()
 
 

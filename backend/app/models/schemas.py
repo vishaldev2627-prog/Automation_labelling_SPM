@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -126,7 +126,7 @@ class BoundingBox(BaseModel):
     width: float
     height: float
 
-    def to_xyxy(self, img_w: int, img_h: int) -> tuple[int, int, int, int]:
+    def to_xyxy(self, img_w: int, img_h: int) -> Tuple[int, int, int, int]:
         cx, cy, w, h = self.x_center * img_w, self.y_center * img_h, self.width * img_w, self.height * img_h
         x1 = max(0, int(cx - w / 2))
         y1 = max(0, int(cy - h / 2))
@@ -173,7 +173,7 @@ class AnnotationObject(BaseModel):
     # unassessed - see Condition, and note that is not the same as "ok".
     condition: Optional[Condition] = None
     bbox: BoundingBox
-    polygon: list[Point] = Field(default_factory=list)
+    polygon: List[Point] = Field(default_factory=list)
     # Extra disjoint pieces of the same object, for `fine_structure` classes
     # only (crack, corrosion, shelling). `polygon` stays the largest piece so
     # every existing consumer - canvas rendering, export, mask rasterization -
@@ -181,11 +181,11 @@ class AnnotationObject(BaseModel):
     # crack used to lose these entirely (polygon_service kept only the largest
     # contour), which silently destroyed the length-recall the pipeline scores
     # these classes on (docs/pipeline.md §5.4).
-    extra_polygons: list[list[Point]] = Field(default_factory=list)
+    extra_polygons: List[List[Point]] = Field(default_factory=list)
     detector_confidence: Optional[float] = None
     mask_confidence: float = 0.0
     mask_source: Optional[MaskSource] = None
-    all_mask_scores: list[float] = Field(default_factory=list)
+    all_mask_scores: List[float] = Field(default_factory=list)
     selected_mask_index: int = 0
     status: ObjectStatus = ObjectStatus.PENDING
     visible: bool = True
@@ -261,7 +261,7 @@ class ImageAnnotations(BaseModel):
     file_name: str
     width: int
     height: int
-    objects: list[AnnotationObject] = Field(default_factory=list)
+    objects: List[AnnotationObject] = Field(default_factory=list)
     completed: bool = False
     no_objects_confirmed: bool = False
     # Set per image, applied in bulk from the UI (there is no batch entity in
@@ -280,8 +280,8 @@ class GenerateMaskRequest(BaseModel):
     object_id: Optional[str] = None
     bbox: Optional[BoundingBox] = None
     class_id: Optional[int] = None
-    positive_points: list[Point] = Field(default_factory=list)
-    negative_points: list[Point] = Field(default_factory=list)
+    positive_points: List[Point] = Field(default_factory=list)
+    negative_points: List[Point] = Field(default_factory=list)
 
 
 class GenerateMaskResponse(BaseModel):
@@ -291,14 +291,14 @@ class GenerateMaskResponse(BaseModel):
     confidences are separate fields."""
 
     object_id: str
-    polygon: list[Point]
+    polygon: List[Point]
     # Must be returned, not just persisted server-side: the frontend holds the
     # object list in memory and posts it back on the next autosave, so anything
     # missing from this response is silently dropped from a fine-structure
     # object on the following save.
-    extra_polygons: list[list[Point]] = Field(default_factory=list)
+    extra_polygons: List[List[Point]] = Field(default_factory=list)
     confidence: float
-    all_scores: list[float]
+    all_scores: List[float]
     selected_mask_index: int
 
 
@@ -308,7 +308,7 @@ class GenerateAllRequest(BaseModel):
 
 class SaveAnnotationRequest(BaseModel):
     image_id: str
-    objects: list[AnnotationObject]
+    objects: List[AnnotationObject]
     mark_completed: bool = False
     # Tri-state on purpose: None means "leave whatever is stored alone" so a
     # plain autosave never clears a confirmation, while False is an explicit
@@ -326,7 +326,7 @@ class SetCoachTypeRequest(BaseModel):
     image", so a bulk apply can never silently overwrite work already done."""
 
     coach_type: CoachType
-    image_ids: list[str] = Field(default_factory=list)
+    image_ids: List[str] = Field(default_factory=list)
 
 
 class DatasetInfo(BaseModel):
@@ -335,7 +335,7 @@ class DatasetInfo(BaseModel):
     completed: int
     remaining: int
     percent_complete: float
-    classes: list[str]
+    classes: List[str]
     estimated_seconds_remaining: Optional[float] = None
 
 
@@ -353,8 +353,8 @@ class ClassMapVersionInfo(BaseModel):
 
     version: int
     content_hash: str
-    names: dict[int, str]
-    exclude_classes: list[str]
+    names: Dict[int, str]
+    exclude_classes: List[str]
     created_at: datetime
     created_by: Optional[str] = None
 
@@ -387,7 +387,7 @@ class ClassInfo(BaseModel):
 
 
 class BatchProcessRequest(BaseModel):
-    image_ids: list[str] = Field(default_factory=list)
+    image_ids: List[str] = Field(default_factory=list)
     overwrite: bool = False
 
 
@@ -403,7 +403,7 @@ class BatchJobStatus(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    image_ids: list[str] = Field(default_factory=list)
+    image_ids: List[str] = Field(default_factory=list)
     only_completed: bool = True
     output_subdir: Optional[str] = None
     # Writes crops/<split>/<condition>/... for the p1_side_damage crop
@@ -499,18 +499,18 @@ class TriageQueue(BaseModel):
     a future pipeline integration only has to populate them, not add a
     field the frontend doesn't already know about."""
 
-    field_flagged: list[TriageItem] = Field(default_factory=list)
-    gate_recall_audit_miss: list[TriageItem] = Field(default_factory=list)
-    low_confidence: list[TriageItem] = Field(default_factory=list)
+    field_flagged: List[TriageItem] = Field(default_factory=list)
+    gate_recall_audit_miss: List[TriageItem] = Field(default_factory=list)
+    low_confidence: List[TriageItem] = Field(default_factory=list)
     # Frames whose objects carry no detector confidence at all - boxes read
     # straight from a YOLO label file, or anything annotated before
     # detector/mask confidence were split apart (see AnnotationObject). Not a
     # priority tier from the build plan; a visibility tier, so "we have no
     # signal on these" reads as a stated fact instead of silent absence from
     # the low_confidence tier.
-    no_confidence_signal: list[TriageItem] = Field(default_factory=list)
-    novel: list[TriageItem] = Field(default_factory=list)
-    routine: list[TriageItem] = Field(default_factory=list)
+    no_confidence_signal: List[TriageItem] = Field(default_factory=list)
+    novel: List[TriageItem] = Field(default_factory=list)
+    routine: List[TriageItem] = Field(default_factory=list)
 
 
 class SubmitReviewRequest(BaseModel):
@@ -561,7 +561,7 @@ class CreateGoldenSetRequest(BaseModel):
 
 
 class AddGoldenItemsRequest(BaseModel):
-    image_ids: list[str]
+    image_ids: List[str]
 
 
 class GoldenSetInfo(BaseModel):

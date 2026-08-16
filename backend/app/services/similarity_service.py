@@ -15,7 +15,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -41,13 +41,13 @@ class SimilarityService:
         self._model_lock = threading.Lock()
 
         self._lock = threading.RLock()
-        self._ids: list[str] = []
-        self._hashes: dict[str, str] = {}
+        self._ids: List[str] = []
+        self._hashes: Dict[str, str] = {}
         self._embeddings: Optional[np.ndarray] = None  # (N, D) float32, L2-normalized
-        self._id_to_row: dict[str, int] = {}
+        self._id_to_row: Dict[str, int] = {}
         self._loaded_for_dir: Optional[Path] = None
 
-        self._jobs: dict[str, SimilarityIndexStatus] = {}
+        self._jobs: Dict[str, SimilarityIndexStatus] = {}
         self._jobs_lock = threading.Lock()
         from concurrent.futures import ThreadPoolExecutor
 
@@ -161,7 +161,7 @@ class SimilarityService:
                 self._persist()
         return True
 
-    def novelty_scores(self) -> dict[str, float]:
+    def novelty_scores(self) -> Dict[str, float]:
         """Same index as near-duplicate detection, inverted (Phase 2 tier 3,
         see annotation_module_build_plan.md): a LOW similarity to every
         other indexed image means high novelty - likely worth a human
@@ -178,7 +178,7 @@ class SimilarityService:
             max_sim = sims.max(axis=1)
             return {image_id: float(1.0 - max_sim[i]) for i, image_id in enumerate(self._ids)}
 
-    def nearest_neighbors(self, image_id: str, k: int = 5, min_similarity: float = 0.0) -> list[SimilarNeighbor]:
+    def nearest_neighbors(self, image_id: str, k: int = 5, min_similarity: float = 0.0) -> List[SimilarNeighbor]:
         self._ensure_loaded()
         self.ensure_indexed(image_id)
         with self._lock:
@@ -206,7 +206,7 @@ class SimilarityService:
             return results
 
     # ---------------------------------------------------------------- jobs
-    def start_reindex(self, image_ids: Optional[list[str]] = None) -> SimilarityIndexStatus:
+    def start_reindex(self, image_ids: Optional[List[str]] = None) -> SimilarityIndexStatus:
         self._ensure_loaded()
         ids = image_ids or self._ds.image_ids()
         job_id = new_id()
@@ -224,7 +224,7 @@ class SimilarityService:
         self._executor.submit(self._run_reindex, job_id, ids)
         return status
 
-    def _run_reindex(self, job_id: str, image_ids: list[str]) -> None:
+    def _run_reindex(self, job_id: str, image_ids: List[str]) -> None:
         PERSIST_EVERY = 50
         since_persist = 0
         for image_id in image_ids:

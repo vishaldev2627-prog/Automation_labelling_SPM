@@ -33,7 +33,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -44,7 +44,7 @@ from app.models.db_models import ClassMapVersion
 logger = logging.getLogger(__name__)
 
 
-def canonical_payload(names: list[str], exclude_classes: list[str]) -> dict:
+def canonical_payload(names: List[str], exclude_classes: List[str]) -> dict:
     """The exact structure that gets hashed.
 
     `names` is serialized as an ordered `[id, name]` list rather than an object
@@ -62,7 +62,7 @@ def canonical_payload(names: list[str], exclude_classes: list[str]) -> dict:
     }
 
 
-def content_hash(names: list[str], exclude_classes: list[str]) -> str:
+def content_hash(names: List[str], exclude_classes: List[str]) -> str:
     payload = canonical_payload(names, exclude_classes)
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -78,7 +78,7 @@ def get_current(db: Session, dataset_key: str) -> Optional[ClassMapVersion]:
     ).scalar_one_or_none()
 
 
-def list_versions(db: Session, dataset_key: str) -> list[ClassMapVersion]:
+def list_versions(db: Session, dataset_key: str) -> List[ClassMapVersion]:
     return list(
         db.execute(
             select(ClassMapVersion)
@@ -100,8 +100,8 @@ def get_by_hash(db: Session, dataset_key: str, hash_value: str) -> Optional[Clas
 def ensure_version(
     db: Session,
     dataset_key: str,
-    names: list[str],
-    exclude_classes: list[str],
+    names: List[str],
+    exclude_classes: List[str],
     annotator_id: Optional[int] = None,
 ) -> ClassMapVersion:
     """Resolve this exact class map to a version, minting one if it is new.
@@ -166,7 +166,7 @@ def ensure_version(
     return version
 
 
-def names_from_version(version: ClassMapVersion) -> list[str]:
+def names_from_version(version: ClassMapVersion) -> List[str]:
     """Rebuild the ordered class-name list from a stored version.
 
     Tolerates gaps rather than assuming the ids were contiguous: a historical

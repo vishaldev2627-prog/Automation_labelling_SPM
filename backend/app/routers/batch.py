@@ -1,5 +1,6 @@
 """Batch processing endpoints for generating masks across the whole dataset."""
 from __future__ import annotations
+from typing import List
 
 import logging
 
@@ -33,6 +34,6 @@ def get_batch_status(job_id: str) -> BatchJobStatus:
     return job
 
 
-@router.get("", response_model=list[BatchJobStatus])
-def list_batch_jobs() -> list[BatchJobStatus]:
+@router.get("", response_model=List[BatchJobStatus])
+def list_batch_jobs() -> List[BatchJobStatus]:
     return get_batch_service().list_jobs()

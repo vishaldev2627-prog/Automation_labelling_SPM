@@ -19,7 +19,7 @@ from __future__ import annotations
 import threading
 import time
 from contextvars import ContextVar
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Set, Tuple
 
 DEFAULT_SESSION_ID = "default"
 
@@ -79,7 +79,7 @@ class SessionBundle:
         self.last_used = time.monotonic()
 
 
-_bundles: dict[str, SessionBundle] = {}
+_bundles: Dict[str, SessionBundle] = {}
 _registry_lock = threading.Lock()
 
 
@@ -107,7 +107,7 @@ def set_current_annotator(annotator_id: int, name: str) -> None:
         bundle.annotator_name = name
 
 
-def get_current_annotator() -> tuple[Optional[int], Optional[str]]:
+def get_current_annotator() -> Tuple[Optional[int], Optional[str]]:
     bundle = get_session_bundle()
     return bundle.annotator_id, bundle.annotator_name
 

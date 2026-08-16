@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Set
 
 from app.config import Settings
 
@@ -218,11 +218,11 @@ def _ensure_bucket(client, bucket: str) -> None:
     logger.info("Created bucket %s", bucket)
 
 
-def _existing_keys(client, bucket: str, key_root: str) -> set[str]:
+def _existing_keys(client, bucket: str, key_root: str) -> Set[str]:
     """Keys already under this snapshot's prefix, so a retry resumes. An error
     here degrades to "assume nothing is uploaded" rather than failing - the worst
     case is re-uploading bytes, which is safe because the content is identical."""
-    keys: set[str] = set()
+    keys: Set[str] = set()
     try:
         paginator = client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=bucket, Prefix=f"{key_root}/"):

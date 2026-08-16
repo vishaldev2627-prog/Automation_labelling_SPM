@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Sequence, Union
+from typing import Dict, List, Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
@@ -41,7 +41,7 @@ depends_on: Union[str, Sequence[str], None] = None
 SEED_EXCLUDE_CLASSES = ["leakage"]
 
 
-def _content_hash(names: list[str], exclude_classes: list[str]) -> str:
+def _content_hash(names: List[str], exclude_classes: List[str]) -> str:
     """Duplicated from class_map_service on purpose: a migration must not import
     application code, or it stops being reproducible against the schema it was
     written for."""
@@ -81,7 +81,7 @@ def upgrade() -> None:
         )
     ).fetchall()
 
-    by_view: dict[str, dict[int, str]] = {}
+    by_view: Dict[str, Dict[int, str]] = {}
     for dataset_view, class_id, name in rows:
         by_view.setdefault(dataset_view, {})[int(class_id)] = name
 

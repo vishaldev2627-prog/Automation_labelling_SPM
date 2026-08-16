@@ -36,7 +36,7 @@ recommendation, not a re-verified guarantee.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Dict, Optional, Set, Tuple
 
 from app.config import get_settings
 from app.services.promotion_gate import (
@@ -71,7 +71,7 @@ def registered_model_name(slug: str) -> str:
     return f"{REGISTERED_MODEL_PREFIX}-{slug}"
 
 
-def _candidate_metrics(golden_per_class: dict[int, dict[str, float]]) -> ModelVersionMetrics:
+def _candidate_metrics(golden_per_class: Dict[int, Dict[str, float]]) -> ModelVersionMetrics:
     per_class = {}
     for class_id, m in golden_per_class.items():
         kwargs = {"class_id": class_id}
@@ -82,13 +82,13 @@ def _candidate_metrics(golden_per_class: dict[int, dict[str, float]]) -> ModelVe
     return ModelVersionMetrics(per_class=per_class)
 
 
-def _production_metrics_from_run(prod_metrics: dict, candidate_class_ids: set[int]) -> ModelVersionMetrics:
+def _production_metrics_from_run(prod_metrics: dict, candidate_class_ids: Set[int]) -> ModelVersionMetrics:
     """Reads back the same golden/class{N}_* metric keys detector_service
     logs, for whatever classes the PRODUCTION run happens to have logged -
     not just the candidate's classes, since compare() needs production's
     full class set to detect an unexplained removal."""
     per_class: dict = {}
-    seen_class_ids: set[int] = set()
+    seen_class_ids: Set[int] = set()
     for key in prod_metrics:
         if not key.startswith("golden/class"):
             continue
@@ -114,12 +114,12 @@ def _production_metrics_from_run(prod_metrics: dict, candidate_class_ids: set[in
 def _decide(
     client,
     name: str,
-    golden_per_class: dict[int, dict[str, float]],
+    golden_per_class: Dict[int, Dict[str, float]],
     class_infos,
     model_size_mb: float,
     latency_p95_ms: float,
     thresholds: Optional[PromotionThresholds] = None,
-) -> tuple[PromotionDecision, Optional[str]]:
+) -> Tuple[PromotionDecision, Optional[str]]:
     """Never raises - a comparison failure degrades to a REJECT with a
     clear reason rather than blocking registration, since this is advisory
     only (register_and_recommend's own contract). Returns
@@ -170,7 +170,7 @@ def _decide(
 def register_and_recommend(
     dataset_slug: str,
     run_id: str,
-    golden_per_class: dict[int, dict[str, float]],
+    golden_per_class: Dict[int, Dict[str, float]],
     class_infos,
     model_size_mb: float = 0.0,
     latency_p95_ms: float = 0.0,

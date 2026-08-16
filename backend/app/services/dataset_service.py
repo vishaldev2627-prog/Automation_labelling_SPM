@@ -13,7 +13,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 from app.config import Settings
 from app.db import SessionLocal
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # an instance-level lock does nothing to serialize their concurrent
 # add_class() calls against each other. This one is shared by anyone pointed
 # at the same folder.
-_class_list_locks: dict[str, threading.Lock] = {}
+_class_list_locks: Dict[str, threading.Lock] = {}
 _class_list_locks_guard = threading.Lock()
 
 
@@ -112,14 +112,14 @@ class DatasetService:
         self._labels_dir: Optional[Path] = None
         self._state_dir: Optional[Path] = None
         self._dataset_key: Optional[str] = None  # resolved dataset root; DB key for annotation_state/dataset_classes
-        self._index: dict[str, Path] = {}  # image_id -> image path
-        self._classes: list[str] = []
-        self._colors: dict[str, str] = {}
-        self._safety: dict[str, bool] = {}
-        self._fine_structure: dict[str, bool] = {}
-        self._states: dict[str, str] = {}
-        self._tiers: dict[str, str] = {}
-        self._ever_active: dict[str, bool] = {}
+        self._index: Dict[str, Path] = {}  # image_id -> image path
+        self._classes: List[str] = []
+        self._colors: Dict[str, str] = {}
+        self._safety: Dict[str, bool] = {}
+        self._fine_structure: Dict[str, bool] = {}
+        self._states: Dict[str, str] = {}
+        self._tiers: Dict[str, str] = {}
+        self._ever_active: Dict[str, bool] = {}
         self._class_map_version: Optional[int] = None
         self._class_map_hash: Optional[str] = None
         self._loaded = False
@@ -252,7 +252,7 @@ class DatasetService:
     def class_map_hash(self) -> Optional[str]:
         return self._class_map_hash
 
-    def get_classes(self) -> list[ClassInfo]:
+    def get_classes(self) -> List[ClassInfo]:
         return [
             ClassInfo(
                 class_id=i,
@@ -468,7 +468,7 @@ class DatasetService:
         (root / "classes.txt").write_text("\n".join(self._classes) + "\n", encoding="utf-8")
 
     # --------------------------------------------------------------- index
-    def list_images(self) -> list[ImageListItem]:
+    def list_images(self) -> List[ImageListItem]:
         self.require_loaded()
         states = self._read_states_bulk(list(self._index.keys()))
         items = []
@@ -491,7 +491,7 @@ class DatasetService:
             raise ImageNotFoundError(f"Image '{image_id}' not found in loaded dataset")
         return path
 
-    def image_ids(self) -> list[str]:
+    def image_ids(self) -> List[str]:
         return list(self._index.keys())
 
     # ------------------------------------------------------------ per-image
@@ -502,14 +502,14 @@ class DatasetService:
         finally:
             db.close()
 
-    def _read_states_bulk(self, image_ids: list[str]) -> dict[str, dict]:
+    def _read_states_bulk(self, image_ids: List[str]) -> Dict[str, dict]:
         db = SessionLocal()
         try:
             return state_repo.get_states_bulk(db, self._dataset_key, image_ids)
         finally:
             db.close()
 
-    def get_saved_states(self, image_ids: list[str]) -> dict[str, dict]:
+    def get_saved_states(self, image_ids: List[str]) -> Dict[str, dict]:
         """Public bulk read of already-saved annotation state, keyed by
         image_id. Used by triage_service to inspect saved object confidence
         without forcing a fresh detector run per image."""
@@ -569,7 +569,7 @@ class DatasetService:
         )
         return annotations
 
-    def _try_auto_detect(self, path: Path) -> list[tuple[int, BoundingBox, Optional[float], list[Point]]]:
+    def _try_auto_detect(self, path: Path) -> List[Tuple[int, BoundingBox, Optional[float], List[Point]]]:
         """Fall back to the most recently trained detector for images that
         have no pre-existing detection labels at all. The fourth element is
         the detector's own predicted mask polygon (Option B) - empty when
@@ -624,7 +624,7 @@ class DatasetService:
             estimated_seconds_remaining=eta,
         )
 
-    def _estimate_eta(self, total: int, completed: int, states: dict[str, dict]) -> Optional[float]:
+    def _estimate_eta(self, total: int, completed: int, states: Dict[str, dict]) -> Optional[float]:
         """Estimate remaining time from the average gap between completion timestamps."""
         if completed < 2:
             return None

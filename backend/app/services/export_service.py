@@ -1,5 +1,6 @@
 """Exports reviewed annotations to a ready-to-train YOLO segmentation dataset."""
 from __future__ import annotations
+from typing import Dict, List, Set, Tuple
 
 import hashlib
 import logging
@@ -53,7 +54,7 @@ class ExportService:
     @staticmethod
     def _enforce_split_integrity(
         natural_split: str, propagated_here: int, is_auto_accepted: bool
-    ) -> tuple[str, bool]:
+    ) -> Tuple[str, bool]:
         """M3: pseudo/synthetic (propagated) and auto-accepted labels must
         never land in val/test (pipeline.md's retrain rule, via
         FINAL_AIML §12: "pseudo/synthetic -> train split only, never
@@ -142,7 +143,7 @@ class ExportService:
             written += 1
         return written
 
-    def _fine_structure_masks_by_class(self, annotations: ImageAnnotations) -> dict[int, np.ndarray]:
+    def _fine_structure_masks_by_class(self, annotations: ImageAnnotations) -> Dict[int, np.ndarray]:
         """Rasterize every `fine_structure` class present in this image into
         one unioned 0/1 mask per class id, at native resolution. Shared by
         `_write_fine_structure_masks` (W-3) and `_write_wheel_unwraps` (W-5) -
@@ -158,7 +159,7 @@ class ExportService:
         """
         import numpy as np
 
-        by_class: dict[int, list[list]] = {}
+        by_class: Dict[int, List[list]] = {}
         for obj in annotations.objects:
             if obj.status == ObjectStatus.REJECTED:
                 continue
@@ -168,7 +169,7 @@ class ExportService:
                 if len(piece) >= 3:
                     by_class.setdefault(obj.class_id, []).append(piece)
 
-        masks: dict[int, np.ndarray] = {}
+        masks: Dict[int, np.ndarray] = {}
         for class_id, pieces in by_class.items():
             mask = np.zeros((annotations.height, annotations.width), dtype=np.uint8)
             for piece in pieces:
@@ -437,15 +438,15 @@ class ExportService:
         # annotation_module_build_plan.md): an image completed before the
         # gate went live is grandfathered (ExportGateExemption); anything
         # completed after needs its *latest* review to be "approved."
-        eligible_ids: set[str] = set()
+        eligible_ids: Set[str] = set()
         # Provenance sets, read once. These populate the manifest's `provenance`
         # block, which deliberately includes the uncomfortable numbers - notably
         # grandfathered_unreviewed_images, because if that is non-zero a model
         # trained on this snapshot cannot claim "all data second-reviewed".
-        exempt_ids: set[str] = set()
-        second_reviewed_ids: set[str] = set()
-        audit_sampled_ids: set[str] = set()
-        auto_accepted_ids: set[str] = set()
+        exempt_ids: Set[str] = set()
+        second_reviewed_ids: Set[str] = set()
+        audit_sampled_ids: Set[str] = set()
+        auto_accepted_ids: Set[str] = set()
         db = SessionLocal()
         try:
             if request.only_completed:
@@ -483,8 +484,8 @@ class ExportService:
         # {coach_type: {class_id: label count}} - an aggregate per-class count
         # hides a class well covered on LHB and absent on ICF, which is what the
         # pipeline team's label-scarcity risk needs to be actionable.
-        per_class_counts: dict[str, dict[int, int]] = {}
-        split_counts: dict[str, dict[str, int]] = {}
+        per_class_counts: Dict[str, Dict[int, int]] = {}
+        split_counts: Dict[str, Dict[str, int]] = {}
         integrity = {
             # M3: enforced, not just measured - _split_for's natural assignment
             # is overridden below whenever it would land pseudo/synthetic
@@ -525,7 +526,7 @@ class ExportService:
         # (image_id, label lines, the annotations themselves) - the third element
         # is carried so the mask-raster pass below doesn't have to re-read state
         # per image just to get dimensions and per-object pieces.
-        exportable: list[tuple[str, list[tuple[int, list]], ImageAnnotations]] = []
+        exportable: List[Tuple[str, List[Tuple[int, list]], ImageAnnotations]] = []
         skipped = 0
         needs_review = 0
         negatives = 0

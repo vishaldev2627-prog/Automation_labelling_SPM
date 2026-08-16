@@ -16,7 +16,7 @@ mocked here (same reasoning as test_golden_set.py staying DB-free).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Dict, Optional
 
 from app.models.schemas import ClassInfo
 from app.services.model_registry_service import _decide, registered_model_name
@@ -40,7 +40,7 @@ class _FakeModelVersion:
 
 @dataclass
 class _FakeRunData:
-    metrics: dict[str, float] = field(default_factory=dict)
+    metrics: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -49,7 +49,7 @@ class _FakeRun:
 
 
 class _FakeClient:
-    def __init__(self, production_version: Optional["_FakeModelVersion"], run_metrics: dict[str, float]) -> None:
+    def __init__(self, production_version: Optional["_FakeModelVersion"], run_metrics: Dict[str, float]) -> None:
         self._production_version = production_version
         self._run_metrics = run_metrics
 
@@ -175,8 +175,8 @@ class _FullFakeClient(_FakeClient):
 
     def __init__(self, production_version=None, run_metrics=None):
         super().__init__(production_version, run_metrics or {})
-        self.tags: dict[str, str] = {}
-        self.aliases: dict[str, str] = {}
+        self.tags: Dict[str, str] = {}
+        self.aliases: Dict[str, str] = {}
         self.created_model_version = None
 
     def create_registered_model(self, name):

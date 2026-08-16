@@ -6,6 +6,7 @@ snapshot to the staging object store is a separate, retryable step, because the
 snapshot is already safely on disk by then - see app/services/object_store.py.
 """
 from __future__ import annotations
+from typing import List
 
 import logging
 from pathlib import Path
@@ -39,11 +40,11 @@ def export_dataset(request: ExportRequest) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/snapshots", response_model=list[SnapshotInfo])
+@router.get("/snapshots", response_model=List[SnapshotInfo])
 def list_snapshots(
     all_views: bool = Query(default=False, description="Include snapshots from other dataset views"),
     limit: int = Query(default=50, ge=1, le=500),
-) -> list[SnapshotInfo]:
+) -> List[SnapshotInfo]:
     """Snapshots, most-recently-exported first.
 
     Scoped to the loaded view by default. `all_views=true` lifts that - useful

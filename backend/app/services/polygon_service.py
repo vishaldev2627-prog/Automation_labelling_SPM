@@ -1,5 +1,6 @@
 """Binary mask <-> polygon conversion using OpenCV contour extraction."""
 from __future__ import annotations
+from typing import List, Tuple
 
 import logging
 
@@ -22,7 +23,7 @@ def mask_to_polygon(
     mask: np.ndarray,
     epsilon_ratio: float = 0.002,
     min_points: int = 3,
-) -> list[Point]:
+) -> List[Point]:
     """Convert a binary mask to a single simplified polygon (normalized 0-1 coords).
 
     Picks the largest external contour (handles noisy SAM output), simplifies it
@@ -42,7 +43,7 @@ def mask_to_polygons(
     epsilon_ratio: float = 0.002,
     min_points: int = 3,
     all_contours: bool = True,
-) -> list[list[Point]]:
+) -> List[List[Point]]:
     """Convert a binary mask to one polygon per external contour.
 
     `all_contours=True` with `epsilon_ratio=0` is the **fine-structure** path,
@@ -81,7 +82,7 @@ def mask_to_polygons(
 
     selected = contours if all_contours else [max(contours, key=cv2.contourArea)]
 
-    scored: list[tuple[float, list[Point]]] = []
+    scored: List[Tuple[float, List[Point]]] = []
     for contour in selected:
         area = cv2.contourArea(contour)
         if area < MIN_CONTOUR_AREA:
@@ -111,7 +112,7 @@ def mask_to_polygons(
     return [polygon for _area, polygon in scored]
 
 
-def polygon_to_mask(polygon: list[Point], width: int, height: int) -> np.ndarray:
+def polygon_to_mask(polygon: List[Point], width: int, height: int) -> np.ndarray:
     """Rasterize a normalized polygon into a binary mask."""
     mask = np.zeros((height, width), dtype=np.uint8)
     if len(polygon) < 3:
@@ -121,7 +122,7 @@ def polygon_to_mask(polygon: list[Point], width: int, height: int) -> np.ndarray
     return mask.astype(bool)
 
 
-def simplify_polygon(polygon: list[Point], width: int, height: int, epsilon_ratio: float = 0.002) -> list[Point]:
+def simplify_polygon(polygon: List[Point], width: int, height: int, epsilon_ratio: float = 0.002) -> List[Point]:
     """Re-simplify an existing (possibly hand-edited) polygon."""
     if len(polygon) < 4:
         return polygon
@@ -134,7 +135,7 @@ def simplify_polygon(polygon: list[Point], width: int, height: int, epsilon_rati
     return [Point(x=float(px) / width, y=float(py) / height) for px, py in simplified]
 
 
-def clip_polygon_to_image(polygon: list[Point]) -> list[Point]:
+def clip_polygon_to_image(polygon: List[Point]) -> List[Point]:
     """Clamp all polygon points into the [0, 1] normalized image bounds."""
     return [Point(x=min(1.0, max(0.0, p.x)), y=min(1.0, max(0.0, p.y))) for p in polygon]
 

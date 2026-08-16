@@ -31,6 +31,7 @@ Only tiers buildable without pipeline data are implemented:
 empty - blocked on Q-E and an actual pipeline connection.
 """
 from __future__ import annotations
+from typing import Dict, List, Set, Tuple
 
 import random
 
@@ -74,7 +75,7 @@ def build_triage_queue(ds: DatasetService, similarity: SimilarityService) -> Tri
     )
 
 
-def _detector_confidences(state: dict) -> list[float]:
+def _detector_confidences(state: dict) -> List[float]:
     """Detector confidences present on this image's saved objects. `None`
     (no signal - a plain YOLO label file carries no confidence field) is
     dropped rather than read as 0.0; see AnnotationObject on why those two
@@ -86,8 +87,8 @@ def _detector_confidences(state: dict) -> list[float]:
     ]
 
 
-def _low_confidence_tier(states: dict[str, dict], file_names: dict[str, str]) -> list[TriageItem]:
-    scored: list[tuple[str, float]] = []
+def _low_confidence_tier(states: Dict[str, dict], file_names: Dict[str, str]) -> List[TriageItem]:
+    scored: List[Tuple[str, float]] = []
     for image_id, state in states.items():
         confidences = _detector_confidences(state)
         if not confidences:
@@ -103,8 +104,8 @@ def _low_confidence_tier(states: dict[str, dict], file_names: dict[str, str]) ->
 
 
 def _no_signal_tier(
-    states: dict[str, dict], file_names: dict[str, str], excluded: set[str]
-) -> list[TriageItem]:
+    states: Dict[str, dict], file_names: Dict[str, str], excluded: Set[str]
+) -> List[TriageItem]:
     """Saved images that have objects but no detector confidence on any of
     them. Images with no saved state at all are left out - those have no
     objects to have a signal about, and the routine tier already samples
@@ -117,8 +118,8 @@ def _no_signal_tier(
 
 
 def _novel_tier(
-    similarity: SimilarityService, candidate_ids: set[str], file_names: dict[str, str], excluded: set[str]
-) -> list[TriageItem]:
+    similarity: SimilarityService, candidate_ids: Set[str], file_names: Dict[str, str], excluded: Set[str]
+) -> List[TriageItem]:
     scores = similarity.novelty_scores()
     scored = [
         (image_id, score) for image_id, score in scores.items() if image_id in candidate_ids and image_id not in excluded
@@ -130,7 +131,7 @@ def _novel_tier(
     ]
 
 
-def _routine_tier(items, excluded: set[str]) -> list[TriageItem]:
+def _routine_tier(items, excluded: Set[str]) -> List[TriageItem]:
     pool = [i for i in items if i.image_id not in excluded]
     rng = random.Random(ROUTINE_SAMPLE_SEED)
     sample = rng.sample(pool, min(ROUTINE_SAMPLE_N, len(pool)))

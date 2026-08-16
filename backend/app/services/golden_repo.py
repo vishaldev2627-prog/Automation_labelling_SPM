@@ -7,7 +7,7 @@ bucket) built on top of it.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional, Set
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -45,7 +45,7 @@ def get_version(db: Session, golden_set_id: int) -> Optional[GoldenSet]:
     return db.execute(select(GoldenSet).where(GoldenSet.id == golden_set_id)).scalar_one_or_none()
 
 
-def list_versions(db: Session, dataset_view: Optional[str] = None) -> list[GoldenSet]:
+def list_versions(db: Session, dataset_view: Optional[str] = None) -> List[GoldenSet]:
     query = select(GoldenSet).order_by(GoldenSet.dataset_view, GoldenSet.version.desc())
     if dataset_view is not None:
         query = query.where(GoldenSet.dataset_view == dataset_view)
@@ -64,7 +64,7 @@ def add_item(
     return item
 
 
-def list_items(db: Session, golden_set_id: int) -> list[GoldenSetItem]:
+def list_items(db: Session, golden_set_id: int) -> List[GoldenSetItem]:
     return list(
         db.execute(
             select(GoldenSetItem).where(GoldenSetItem.golden_set_id == golden_set_id)
@@ -72,7 +72,7 @@ def list_items(db: Session, golden_set_id: int) -> list[GoldenSetItem]:
     )
 
 
-def get_golden_image_ids(db: Session, dataset_view: str) -> set[str]:
+def get_golden_image_ids(db: Session, dataset_view: str) -> Set[str]:
     """Every image_id ever frozen into a golden set for this view, across
     **all** versions - not just the latest. Once an image is golden it must
     stay disjoint from every export split permanently (D-Q4: "nothing that

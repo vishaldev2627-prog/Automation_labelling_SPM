@@ -10,6 +10,7 @@ assembly step, which is pure file I/O against a duck-typed dataset service.
     cd backend && python -m tests.test_golden_eval_service   # no pytest
 """
 from __future__ import annotations
+from typing import Dict, List
 
 import tempfile
 from pathlib import Path
@@ -35,7 +36,7 @@ class _FakeDatasetService:
     get_annotations and get_image_path - so this is testable without a real
     DatasetService/Postgres."""
 
-    def __init__(self, root: Path, annotations: dict[str, ImageAnnotations]) -> None:
+    def __init__(self, root: Path, annotations: Dict[str, ImageAnnotations]) -> None:
         self._root = root
         self._annotations = annotations
 
@@ -48,7 +49,7 @@ class _FakeDatasetService:
         return path
 
 
-def _annotations(image_id: str, objects: list[AnnotationObject], no_objects_confirmed: bool = False) -> ImageAnnotations:
+def _annotations(image_id: str, objects: List[AnnotationObject], no_objects_confirmed: bool = False) -> ImageAnnotations:
     return ImageAnnotations(
         image_id=image_id, file_name=f"{image_id}.jpg", width=100, height=100,
         objects=objects, no_objects_confirmed=no_objects_confirmed,
@@ -219,7 +220,7 @@ class _FakeFpFnModel:
     predict() result, so each test controls exactly what the model
     'sees' for each golden image."""
 
-    def __init__(self, results_by_image_id: dict[str, list]) -> None:
+    def __init__(self, results_by_image_id: Dict[str, list]) -> None:
         self._results_by_image_id = results_by_image_id
 
     def predict(self, path, conf, verbose=False):

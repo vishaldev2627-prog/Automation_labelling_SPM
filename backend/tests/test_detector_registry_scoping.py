@@ -20,7 +20,7 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from app.models.schemas import ClassInfo
 from app.services.dataset_service import DatasetNotFoundError
@@ -37,7 +37,7 @@ class FakeDatasetService:
     """Minimal stand-in for the two DatasetService members DetectorService uses."""
 
     key: Optional[str]
-    classes: list[str] = field(default_factory=list)
+    classes: List[str] = field(default_factory=list)
 
     @property
     def dataset_key(self) -> str:
@@ -45,7 +45,7 @@ class FakeDatasetService:
             raise DatasetNotFoundError("No dataset loaded.")
         return self.key
 
-    def get_classes(self) -> list[ClassInfo]:
+    def get_classes(self) -> List[ClassInfo]:
         if self.key is None:
             raise DatasetNotFoundError("No dataset loaded.")
         return [
@@ -54,7 +54,7 @@ class FakeDatasetService:
         ]
 
 
-def _svc(models_dir: Path, key: Optional[str], classes: list[str]) -> DetectorService:
+def _svc(models_dir: Path, key: Optional[str], classes: List[str]) -> DetectorService:
     return DetectorService(FakeDatasetService(key, classes), models_dir)
 
 

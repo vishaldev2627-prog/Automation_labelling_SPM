@@ -11,7 +11,7 @@ export_service.py will include them.
 from __future__ import annotations
 
 import random
-from typing import Optional
+from typing import Dict, List, Optional, Set
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -96,7 +96,7 @@ def get_latest_review(db: Session, ds: DatasetService, image_id: str) -> Optiona
     )
 
 
-def _reviewed_image_ids(db: Session, dataset_key: str, reason: str) -> set[str]:
+def _reviewed_image_ids(db: Session, dataset_key: str, reason: str) -> Set[str]:
     rows = db.execute(
         select(AnnotationReview.image_id)
         .where(AnnotationReview.dataset_view == dataset_key, AnnotationReview.reason == reason)
@@ -105,14 +105,14 @@ def _reviewed_image_ids(db: Session, dataset_key: str, reason: str) -> set[str]:
     return {r[0] for r in rows}
 
 
-def get_reviewed_image_ids(db: Session, dataset_key: str, reason: str) -> set[str]:
+def get_reviewed_image_ids(db: Session, dataset_key: str, reason: str) -> Set[str]:
     """Public wrapper over the private helper - the snapshot manifest's
     provenance block needs these sets (second_review / audit_sample /
     auto_accept) and should not reach into a module private."""
     return _reviewed_image_ids(db, dataset_key, reason)
 
 
-def get_exempt_image_ids(db: Session, dataset_key: str, image_ids: list[str]) -> set[str]:
+def get_exempt_image_ids(db: Session, dataset_key: str, image_ids: List[str]) -> Set[str]:
     """Grandfathered images - exportable without a second review only because
     they were completed before that gate existed. The snapshot manifest reports
     the count, because a non-zero value means a model trained on that snapshot
@@ -120,7 +120,7 @@ def get_exempt_image_ids(db: Session, dataset_key: str, image_ids: list[str]) ->
     return _exempt_image_ids(db, dataset_key, image_ids)
 
 
-def get_pending_second_review(db: Session, ds: DatasetService, limit: int = 100) -> list[TriageItem]:
+def get_pending_second_review(db: Session, ds: DatasetService, limit: int = 100) -> List[TriageItem]:
     """Completed images that need a second_review decision to become
     export-eligible - excludes grandfathered (exempt) images, since those
     don't need review to export regardless of review history."""
@@ -135,7 +135,7 @@ def get_pending_second_review(db: Session, ds: DatasetService, limit: int = 100)
     ]
 
 
-def _exempt_image_ids(db: Session, dataset_key: str, image_ids: list[str]) -> set[str]:
+def _exempt_image_ids(db: Session, dataset_key: str, image_ids: List[str]) -> Set[str]:
     if not image_ids:
         return set()
     rows = db.execute(
@@ -146,7 +146,7 @@ def _exempt_image_ids(db: Session, dataset_key: str, image_ids: list[str]) -> se
     return {r[0] for r in rows}
 
 
-def get_export_eligible_ids(db: Session, dataset_key: str, image_ids: list[str]) -> set[str]:
+def get_export_eligible_ids(db: Session, dataset_key: str, image_ids: List[str]) -> Set[str]:
     """Union of grandfathered-exempt images and images whose *latest*
     review decision is "approved" - a later "rejected" after an earlier
     "approved" correctly un-approves it, since this always takes the most
@@ -161,7 +161,7 @@ def get_export_eligible_ids(db: Session, dataset_key: str, image_ids: list[str])
         .where(AnnotationReview.dataset_view == dataset_key, AnnotationReview.image_id.in_(image_ids))
         .order_by(AnnotationReview.created_at.asc())
     ).all()
-    latest_decision: dict[str, str] = {}
+    latest_decision: Dict[str, str] = {}
     for image_id, decision in rows:
         latest_decision[image_id] = decision  # later rows overwrite earlier ones - ascending order
     approved = {image_id for image_id, decision in latest_decision.items() if decision == "approved"}
@@ -169,7 +169,7 @@ def get_export_eligible_ids(db: Session, dataset_key: str, image_ids: list[str])
     return exempt | approved
 
 
-def get_class_audit_stats(db: Session, ds: DatasetService) -> dict[str, dict[str, int]]:
+def get_class_audit_stats(db: Session, ds: DatasetService) -> Dict[str, Dict[str, int]]:
     """Per class_id (as str, matching DatasetService._colors/_safety's own
     keying), how many audit_sample reviews touched an image containing that
     class, and how many were approved vs rejected. This is the measured-
@@ -195,7 +195,7 @@ def get_class_audit_stats(db: Session, ds: DatasetService) -> dict[str, dict[str
     image_ids = list({image_id for image_id, _ in rows})
     states = ds.get_saved_states(image_ids)
 
-    stats: dict[str, dict[str, int]] = {}
+    stats: Dict[str, Dict[str, int]] = {}
     for image_id, decision in rows:
         state = states.get(image_id)
         if not state:
@@ -208,7 +208,7 @@ def get_class_audit_stats(db: Session, ds: DatasetService) -> dict[str, dict[str
     return stats
 
 
-def get_audit_sample(db: Session, ds: DatasetService, sample_rate: float = AUDIT_SAMPLE_RATE) -> list[TriageItem]:
+def get_audit_sample(db: Session, ds: DatasetService, sample_rate: float = AUDIT_SAMPLE_RATE) -> List[TriageItem]:
     """A stable random sample of completed images containing propagated
     objects (source == "propagated"), excluding ones already audit-sampled.
     Sample size is `sample_rate` of the total propagated-completed pool -

@@ -23,7 +23,7 @@ just the first.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Dict, List, Optional, Set
 
 from app.config import Settings
 
@@ -36,7 +36,7 @@ class UnexplainedClassRemoval(Exception):
     in dataset assembly, and compare() refuses to produce a result rather
     than silently treating it as an intentional removal."""
 
-    def __init__(self, class_ids: list[int]) -> None:
+    def __init__(self, class_ids: List[int]) -> None:
         self.class_ids = class_ids
         super().__init__(
             f"Class(es) {class_ids} are absent from the candidate's class set but were never "
@@ -64,7 +64,7 @@ class ClassMetrics:
 
 @dataclass
 class ModelVersionMetrics:
-    per_class: dict[int, ClassMetrics]
+    per_class: Dict[int, ClassMetrics]
 
 
 @dataclass
@@ -82,7 +82,7 @@ class ClassRegistryView:
     golden-eval result should exist in the current class map) default to
     the same conservative values the DB columns themselves default to."""
 
-    def __init__(self, entries: dict[int, ClassRegistryEntry]) -> None:
+    def __init__(self, entries: Dict[int, ClassRegistryEntry]) -> None:
         self._entries = entries
 
     def tier(self, class_id: int) -> str:
@@ -109,23 +109,23 @@ class ClassRegistryView:
 
 @dataclass
 class ComparisonResult:
-    common_classes: dict[int, dict]  # class_id -> {candidate, production, delta_ap50, regressed, tier}
-    new_classes: dict[int, dict]  # class_id -> {candidate, meets_floor, floor_used}
-    removed_classes: list[int]  # present in production, absent (explicitly deprecated) from candidate
-    reintroduced_classes: list[int]  # present in candidate, was_ever_active - routed through new_classes, not common
+    common_classes: Dict[int, dict]  # class_id -> {candidate, production, delta_ap50, regressed, tier}
+    new_classes: Dict[int, dict]  # class_id -> {candidate, meets_floor, floor_used}
+    removed_classes: List[int]  # present in production, absent (explicitly deprecated) from candidate
+    reintroduced_classes: List[int]  # present in candidate, was_ever_active - routed through new_classes, not common
     overall: dict  # {candidate_map50, production_map50} - reported only, never a should_promote() criterion
-    candidate_class_set: set[int]
-    production_class_set: set[int]
+    candidate_class_set: Set[int]
+    production_class_set: Set[int]
 
 
 @dataclass
 class PromotionThresholds:
-    regression_tolerance_ap50: dict[str, float]
-    new_class_floor_ap50: dict[str, float]
+    regression_tolerance_ap50: Dict[str, float]
+    new_class_floor_ap50: Dict[str, float]
     min_val_instances: int
     max_latency_p95_ms: float
     max_model_size_mb: float
-    max_false_positive_rate: dict[str, float]
+    max_false_positive_rate: Dict[str, float]
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "PromotionThresholds":
@@ -158,19 +158,19 @@ class OperationalMetrics:
     # Per class_id - only classes with a real measurement (Module 7) should
     # appear here; a class simply absent from this dict is treated as "not
     # measured yet, skip this check for it," never as an implicit 0.0 pass.
-    false_positive_rate: dict[int, float] = field(default_factory=dict)
+    false_positive_rate: Dict[int, float] = field(default_factory=dict)
 
 
 @dataclass
 class PromotionDecision:
     decision: str  # "PROMOTE" | "REJECT"
-    reasons: list[str] = field(default_factory=list)
+    reasons: List[str] = field(default_factory=list)
     hard_fail: bool = False  # a safety-tier regression or unexplained class-set shrink - never overridable
     comparison: Optional[ComparisonResult] = None
     operational: Optional[OperationalMetrics] = None
 
 
-def _weighted_mean_ap50(per_class: dict[int, ClassMetrics]) -> Optional[float]:
+def _weighted_mean_ap50(per_class: Dict[int, ClassMetrics]) -> Optional[float]:
     total_weight = sum(m.n_val_instances for m in per_class.values())
     if total_weight == 0:
         return None
@@ -196,7 +196,7 @@ def compare(
 
     reintroduced = sorted(c for c in new if registry.was_ever_active(c))
 
-    common_result: dict[int, dict] = {}
+    common_result: Dict[int, dict] = {}
     for class_id in common:
         cand = candidate.per_class[class_id]
         prod = production.per_class[class_id]
@@ -211,7 +211,7 @@ def compare(
             "tier": tier,
         }
 
-    new_result: dict[int, dict] = {}
+    new_result: Dict[int, dict] = {}
     for class_id in new:
         cand = candidate.per_class[class_id]
         tier = registry.tier(class_id)
@@ -241,7 +241,7 @@ def should_promote(
     registry: ClassRegistryView,
     thresholds: PromotionThresholds,
 ) -> PromotionDecision:
-    reasons: list[str] = []
+    reasons: List[str] = []
     hard_fail = False
 
     # --- Layer 1: common-class regression -----------------------------

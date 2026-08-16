@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -162,9 +162,9 @@ class SAMService:
         self,
         image_rgb: np.ndarray,
         cache_key: str,
-        box_xyxy: tuple[int, int, int, int],
-        positive_points: Optional[list[tuple[float, float]]] = None,
-        negative_points: Optional[list[tuple[float, float]]] = None,
+        box_xyxy: Tuple[int, int, int, int],
+        positive_points: Optional[List[Tuple[float, float]]] = None,
+        negative_points: Optional[List[Tuple[float, float]]] = None,
     ) -> MaskResult:
         """Run SAM2 with a bounding-box prompt (plus optional point refinements)."""
         if not self.is_available:
@@ -199,8 +199,8 @@ class SAMService:
         self,
         image_rgb: np.ndarray,
         cache_key: str,
-        positive_points: list[tuple[float, float]],
-        negative_points: Optional[list[tuple[float, float]]] = None,
+        positive_points: List[Tuple[float, float]],
+        negative_points: Optional[List[Tuple[float, float]]] = None,
     ) -> MaskResult:
         """Run SAM2 with only click prompts (magic wand / refine mode)."""
         if not self.is_available:

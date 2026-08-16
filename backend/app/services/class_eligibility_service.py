@@ -24,6 +24,7 @@ which would be both slow and wrong for a pure aggregation pass over
 already-annotated data.
 """
 from __future__ import annotations
+from typing import Dict, Set
 
 import logging
 from dataclasses import dataclass, field
@@ -44,7 +45,7 @@ class ClassEligibility:
     class_id: int
     instance_count: int
     image_count: int
-    coach_types: set[str] = field(default_factory=set)
+    coach_types: Set[str] = field(default_factory=set)
     # instance_count * the training pipeline's own val split ratio - an
     # ESTIMATE (the real split is a random per-image shuffle, not a
     # per-class one), documented as such; good enough to catch "this class
@@ -55,9 +56,9 @@ class ClassEligibility:
 
 @dataclass
 class EligibilityThresholds:
-    min_instances: dict[str, int]
-    min_images: dict[str, int]
-    min_coach_types: dict[str, int]
+    min_instances: Dict[str, int]
+    min_images: Dict[str, int]
+    min_coach_types: Dict[str, int]
     min_val_instances: int
 
     @classmethod
@@ -82,7 +83,7 @@ class EligibilityThresholds:
         )
 
 
-def compute_eligibility(ds: DatasetService) -> dict[int, ClassEligibility]:
+def compute_eligibility(ds: DatasetService) -> Dict[int, ClassEligibility]:
     """One pass over every currently-completed image's saved state,
     aggregating per class_id. Non-completed images and rejected objects are
     excluded - the same trust boundary `detector_service._assemble_dataset`
@@ -91,8 +92,8 @@ def compute_eligibility(ds: DatasetService) -> dict[int, ClassEligibility]:
     image_ids = ds.image_ids()
     states = ds.get_saved_states(image_ids)
 
-    per_class: dict[int, ClassEligibility] = {}
-    seen_images: dict[int, set[str]] = {}
+    per_class: Dict[int, ClassEligibility] = {}
+    seen_images: Dict[int, Set[str]] = {}
     total_instances = 0
 
     for image_id, state in states.items():
@@ -141,7 +142,7 @@ def determine_state(
     return "discovered"
 
 
-def recompute_and_apply(ds: DatasetService, settings: Settings) -> dict[int, str]:
+def recompute_and_apply(ds: DatasetService, settings: Settings) -> Dict[int, str]:
     """Computes eligibility for every class currently in this view's class
     map and applies any resulting state transition. Returns
     {class_id: new_state} for every class whose state actually changed
@@ -153,7 +154,7 @@ def recompute_and_apply(ds: DatasetService, settings: Settings) -> dict[int, str
     """
     thresholds = EligibilityThresholds.from_settings(settings)
     eligibility = compute_eligibility(ds)
-    changed: dict[int, str] = {}
+    changed: Dict[int, str] = {}
 
     for class_info in ds.get_classes():
         elig = eligibility.get(

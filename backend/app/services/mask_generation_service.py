@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -23,10 +23,10 @@ class MaskGenerationService:
         self._ds = dataset_service
         self._sam = sam_service
         self._settings = settings
-        self._image_cache: dict[str, tuple[np.ndarray, str]] = {}
+        self._image_cache: Dict[str, Tuple[np.ndarray, str]] = {}
         self._cache_lock = threading.Lock()
 
-    def _load_image_for_sam(self, image_id: str) -> tuple[np.ndarray, str]:
+    def _load_image_for_sam(self, image_id: str) -> Tuple[np.ndarray, str]:
         path = self._ds.get_image_path(image_id)
         cache_key = f"{image_id}:{compute_file_hash(path)}"
         with self._cache_lock:
@@ -42,7 +42,7 @@ class MaskGenerationService:
                     self._image_cache.pop(oldest_key, None)
         return img_rgb, cache_key
 
-    def _contours_for(self, obj: AnnotationObject, mask: np.ndarray) -> list[list[Point]]:
+    def _contours_for(self, obj: AnnotationObject, mask: np.ndarray) -> List[List[Point]]:
         """Mask -> polygon(s), picking the lossy or the faithful path by the
         object's class.
 
@@ -65,8 +65,8 @@ class MaskGenerationService:
         self,
         image_id: str,
         obj: AnnotationObject,
-        positive_points: Optional[list[Point]] = None,
-        negative_points: Optional[list[Point]] = None,
+        positive_points: Optional[List[Point]] = None,
+        negative_points: Optional[List[Point]] = None,
     ) -> AnnotationObject:
         """Run SAM on a single object's bbox (+ optional click refinements)."""
         img_rgb, cache_key = self._load_image_for_sam(image_id)

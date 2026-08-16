@@ -21,6 +21,7 @@ disk. Extra positional args backfill additional arbitrary dataset roots
 (matching /api/dataset/load's arbitrary-path support).
 """
 from __future__ import annotations
+from typing import Dict, Tuple
 
 import json
 import sys
@@ -43,7 +44,7 @@ DEFAULT_PALETTE = [
 ]
 
 
-def backfill_root(root: Path) -> tuple[int, int, int]:
+def backfill_root(root: Path) -> Tuple[int, int, int]:
     """Returns (state_rows_written, state_rows_skipped, class_rows_written)."""
     state_dir = root / ".annotation_state"
     if not state_dir.is_dir():
@@ -99,7 +100,7 @@ def _backfill_classes(db, root: Path, dataset_key: str) -> int:
         return 0
 
     meta_path = root / ".annotation_state" / "_meta.json"
-    colors: dict[str, str] = {}
+    colors: Dict[str, str] = {}
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))

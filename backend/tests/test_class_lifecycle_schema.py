@@ -14,6 +14,7 @@ mapping independently of Alembic actually running.
     cd backend && python -m tests.test_class_lifecycle_schema   # no pytest
 """
 from __future__ import annotations
+from typing import Dict
 
 from contextlib import contextmanager
 
@@ -50,7 +51,7 @@ def test_class_info_defaults_match_column_server_defaults() -> None:
 
 # --------------------------------------------------- DatasetService methods
 
-def _bare_ds(states: dict[str, str]) -> DatasetService:
+def _bare_ds(states: Dict[str, str]) -> DatasetService:
     """A DatasetService instance with only the attributes these methods
     touch populated - bypasses __init__ (which requires a real Settings +
     a loaded dataset) since none of that matters for testing the

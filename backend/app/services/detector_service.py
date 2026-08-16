@@ -39,7 +39,7 @@ import shutil
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from app.config import get_settings
 from app.models.schemas import BoundingBox, DetectorInfo, DetectorTrainJobStatus, ObjectStatus, Point
@@ -91,13 +91,13 @@ class DetectorService:
         self._ds = dataset_service
         self._models_dir = models_dir
         self._models_dir.mkdir(parents=True, exist_ok=True)
-        self._jobs: dict[str, DetectorTrainJobStatus] = {}
+        self._jobs: Dict[str, DetectorTrainJobStatus] = {}
         self._lock = threading.Lock()
         self._loaded_model = None
         self._loaded_model_path: Optional[Path] = None
         # Slugs whose legacy-registry adoption was already evaluated and
         # declined - see _adopt_legacy_registry for why this is cached.
-        self._legacy_adoption_declined: set[str] = set()
+        self._legacy_adoption_declined: Set[str] = set()
 
     # ------------------------------------------------------------- registry
     @property
@@ -587,7 +587,7 @@ class DetectorService:
             waited += settings.gpu_wait_poll_seconds
         return True
 
-    def _resolve_base_weights(self, settings) -> tuple[str, Optional[str]]:
+    def _resolve_base_weights(self, settings) -> Tuple[str, Optional[str]]:
         """Module 8 of the class-incremental promotion plan (docs/
         mlflow_class_incremental_architecture.md §F/§K item 7): warm-start
         from the current Production version's weights instead of always
@@ -656,8 +656,8 @@ class DetectorService:
         return samples[-1]
 
     def _assemble_dataset(
-        self, staging_dir: Path, classes: list[str], trainable_class_ids: set[int]
-    ) -> tuple[Path, int]:
+        self, staging_dir: Path, classes: List[str], trainable_class_ids: Set[int]
+    ) -> Tuple[Path, int]:
         """Write a fresh YOLO-**segmentation** dataset from images you've
         reviewed and marked complete - the same trust boundary export()
         already uses, so the detector only ever learns from annotations a
@@ -760,8 +760,8 @@ class DetectorService:
             return self._loaded_model
 
     def detect(
-        self, image_path: Path, classes: list[str]
-    ) -> list[tuple[int, BoundingBox, float, list[Point]]]:
+        self, image_path: Path, classes: List[str]
+    ) -> List[Tuple[int, BoundingBox, float, List[Point]]]:
         """Run the most recently trained detector on an image with no
         pre-existing labels, returning (class_id, bbox, confidence, polygon)
         tuples - confidence is ultralytics' own box.conf, otherwise
@@ -792,14 +792,14 @@ class DetectorService:
         # None for a detection-only checkpoint (no seg head) - a leftover
         # yolov8s.pt-era registry.json is still loadable, just without polygons.
         mask_polys = result.masks.xyn if result.masks is not None else None
-        detections: list[tuple[int, BoundingBox, float, list[Point]]] = []
+        detections: List[Tuple[int, BoundingBox, float, List[Point]]] = []
         for idx, box in enumerate(result.boxes):
             class_id = int(box.cls.item())
             if class_id >= len(classes):
                 continue
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             confidence = float(box.conf.item())
-            polygon: list[Point] = []
+            polygon: List[Point] = []
             if mask_polys is not None and confidence > mask_threshold:
                 xy = mask_polys[idx]
                 if len(xy) >= 3:

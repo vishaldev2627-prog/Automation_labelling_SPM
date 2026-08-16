@@ -8,7 +8,7 @@ to write to it.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -52,7 +52,7 @@ def propose_candidates(
             "second review."
         ),
     ),
-) -> list[str]:
+) -> List[str]:
     """Read-only: propose a golden-set candidate list from the currently
     loaded view's reviewed images (see golden_service.propose_candidates for
     what "reviewed" means and when the override applies). Does not write
@@ -102,8 +102,8 @@ def create_set(request: CreateGoldenSetRequest) -> GoldenSetInfo:
         db.close()
 
 
-@router.get("/sets", response_model=list[GoldenSetInfo])
-def list_sets(dataset_view: Optional[str] = None) -> list[GoldenSetInfo]:
+@router.get("/sets", response_model=List[GoldenSetInfo])
+def list_sets(dataset_view: Optional[str] = None) -> List[GoldenSetInfo]:
     db = SessionLocal()
     try:
         return [_to_info(db, v) for v in golden_repo.list_versions(db, dataset_view)]
@@ -124,7 +124,7 @@ def get_set(golden_set_id: int) -> GoldenSetInfo:
 
 
 @router.get("/sets/{golden_set_id}/items")
-def list_items(golden_set_id: int) -> list[str]:
+def list_items(golden_set_id: int) -> List[str]:
     db = SessionLocal()
     try:
         return [item.image_id for item in golden_repo.list_items(db, golden_set_id)]
@@ -132,8 +132,8 @@ def list_items(golden_set_id: int) -> list[str]:
         db.close()
 
 
-@router.post("/sets/{golden_set_id}/items", response_model=list[GoldenItemResult])
-def add_items(golden_set_id: int, request: AddGoldenItemsRequest) -> list[GoldenItemResult]:
+@router.post("/sets/{golden_set_id}/items", response_model=List[GoldenItemResult])
+def add_items(golden_set_id: int, request: AddGoldenItemsRequest) -> List[GoldenItemResult]:
     annotator_id, _ = get_current_annotator()
     settings = get_settings()
     ds = get_dataset_service()

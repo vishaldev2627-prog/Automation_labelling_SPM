@@ -1,5 +1,6 @@
 """Image loading, resizing and caching helpers."""
 from __future__ import annotations
+from typing import List, Tuple
 
 import hashlib
 import logging
@@ -33,14 +34,14 @@ def read_image_rgb(path: Path) -> np.ndarray:
     return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
 
-def get_image_dimensions(path: Path) -> tuple[int, int]:
+def get_image_dimensions(path: Path) -> Tuple[int, int]:
     """Return (width, height) without loading full pixel data when possible."""
     img = read_image_bgr(path)
     h, w = img.shape[:2]
     return w, h
 
 
-def downscale_if_needed(img: np.ndarray, max_dimension: int) -> tuple[np.ndarray, float]:
+def downscale_if_needed(img: np.ndarray, max_dimension: int) -> Tuple[np.ndarray, float]:
     """Downscale image so max(h, w) <= max_dimension. Returns (image, scale_factor)."""
     h, w = img.shape[:2]
     largest = max(h, w)
@@ -66,7 +67,7 @@ def encode_jpeg(img_bgr: np.ndarray, quality: int = 90) -> bytes:
     return buf.tobytes()
 
 
-def list_images(directory: Path) -> list[Path]:
+def list_images(directory: Path) -> List[Path]:
     if not directory.exists():
         return []
     return sorted(

@@ -3,7 +3,7 @@ sampling (see annotation_module_build_plan.md and app.services.review_service).
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 
@@ -17,8 +17,8 @@ from app.session_context import get_current_annotator
 router = APIRouter(prefix="/api/review", tags=["review"])
 
 
-@router.get("/pending", response_model=list[TriageItem])
-def get_pending() -> list[TriageItem]:
+@router.get("/pending", response_model=List[TriageItem])
+def get_pending() -> List[TriageItem]:
     ds = get_dataset_service()
     db = SessionLocal()
     try:
@@ -29,8 +29,8 @@ def get_pending() -> list[TriageItem]:
         db.close()
 
 
-@router.get("/audit-sample", response_model=list[TriageItem])
-def get_audit_sample() -> list[TriageItem]:
+@router.get("/audit-sample", response_model=List[TriageItem])
+def get_audit_sample() -> List[TriageItem]:
     ds = get_dataset_service()
     db = SessionLocal()
     try:
@@ -41,8 +41,8 @@ def get_audit_sample() -> list[TriageItem]:
         db.close()
 
 
-@router.get("/class-stats", response_model=list[ClassAuditStats])
-def get_class_stats() -> list[ClassAuditStats]:
+@router.get("/class-stats", response_model=List[ClassAuditStats])
+def get_class_stats() -> List[ClassAuditStats]:
     """Must be declared before GET /{image_id} - FastAPI matches routes in
     order, and {image_id} would otherwise greedily swallow this path."""
     ds = get_dataset_service()

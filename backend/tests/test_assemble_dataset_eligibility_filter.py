@@ -11,6 +11,7 @@ test).
     cd backend && python -m pytest tests/test_assemble_dataset_eligibility_filter.py
 """
 from __future__ import annotations
+from typing import Dict, List, Tuple
 
 import tempfile
 from pathlib import Path
@@ -26,11 +27,11 @@ class _FakeDatasetService:
     """Duck-typed stand-in exposing only what _assemble_dataset uses -
     image_ids, get_annotations, get_image_path, dataset_key."""
 
-    def __init__(self, root: Path, annotations: dict[str, ImageAnnotations]) -> None:
+    def __init__(self, root: Path, annotations: Dict[str, ImageAnnotations]) -> None:
         self._root = root
         self._annotations = annotations
 
-    def image_ids(self) -> list[str]:
+    def image_ids(self) -> List[str]:
         return list(self._annotations.keys())
 
     def get_annotations(self, image_id: str) -> ImageAnnotations:
@@ -50,12 +51,12 @@ def _obj(obj_id: str, class_id: int) -> AnnotationObject:
     return AnnotationObject(id=obj_id, class_id=class_id, bbox=BBOX, polygon=POLY, status=ObjectStatus.CONFIRMED)
 
 
-def _ann(image_id: str, objects: list[AnnotationObject]) -> ImageAnnotations:
+def _ann(image_id: str, objects: List[AnnotationObject]) -> ImageAnnotations:
     return ImageAnnotations(image_id=image_id, file_name=f"{image_id}.jpg", width=100, height=100,
                              objects=objects, completed=True)
 
 
-def _detector(annotations: dict[str, ImageAnnotations], tmp: Path) -> tuple[DetectorService, Path]:
+def _detector(annotations: Dict[str, ImageAnnotations], tmp: Path) -> Tuple[DetectorService, Path]:
     root = tmp / "images_root"
     root.mkdir()
     ds = _FakeDatasetService(root, annotations)

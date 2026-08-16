@@ -14,11 +14,12 @@ test_golden_set.py's reasoning for staying DB-free.
     cd backend && python -m tests.test_golden_selection   # no pytest
 """
 from __future__ import annotations
+from typing import List
 
 from app.services.golden_selection import ImageLabelSummary, propose_golden_candidates
 
 
-def _img(image_id: str, class_ids: list[int], reviewed: bool = True) -> ImageLabelSummary:
+def _img(image_id: str, class_ids: List[int], reviewed: bool = True) -> ImageLabelSummary:
     return ImageLabelSummary(image_id=image_id, class_ids=frozenset(class_ids), reviewed=reviewed)
 
 

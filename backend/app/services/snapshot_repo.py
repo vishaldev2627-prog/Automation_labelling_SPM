@@ -7,7 +7,7 @@ filesystem/hashing and can be tested without a database.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -64,7 +64,7 @@ def get_snapshot(db: Session, snapshot_id: str) -> Optional[DatasetSnapshot]:
     ).scalar_one_or_none()
 
 
-def list_snapshots(db: Session, dataset_view: Optional[str] = None, limit: int = 100) -> list[DatasetSnapshot]:
+def list_snapshots(db: Session, dataset_view: Optional[str] = None, limit: int = 100) -> List[DatasetSnapshot]:
     query = select(DatasetSnapshot).order_by(DatasetSnapshot.last_exported_at.desc()).limit(limit)
     if dataset_view is not None:
         query = query.where(DatasetSnapshot.dataset_view == dataset_view)

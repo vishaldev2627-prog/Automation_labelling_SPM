@@ -1,5 +1,6 @@
 """Visual-similarity index endpoints (Phase 1 annotation propagation)."""
 from __future__ import annotations
+from typing import List
 
 import logging
 
@@ -31,8 +32,8 @@ def get_reindex_status(job_id: str) -> SimilarityIndexStatus:
     return job
 
 
-@router.get("/{image_id}/neighbors", response_model=list[SimilarNeighbor])
-def get_neighbors(image_id: str, k: int = Query(default=5, ge=1, le=50)) -> list[SimilarNeighbor]:
+@router.get("/{image_id}/neighbors", response_model=List[SimilarNeighbor])
+def get_neighbors(image_id: str, k: int = Query(default=5, ge=1, le=50)) -> List[SimilarNeighbor]:
     try:
         return get_similarity_service().nearest_neighbors(image_id, k=k)
     except (DatasetNotFoundError, ImageNotFoundError) as exc:

@@ -9,7 +9,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+from typing import Dict, List, Optional
 
 from app.models.schemas import BatchJobStatus, ObjectStatus
 from app.services.dataset_service import DatasetService
@@ -24,11 +24,11 @@ class BatchService:
         self._ds = dataset_service
         self._mask_service = mask_service
         self._max_workers = max_workers
-        self._jobs: dict[str, BatchJobStatus] = {}
+        self._jobs: Dict[str, BatchJobStatus] = {}
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=1)  # jobs run sequentially; inference itself is the bottleneck
 
-    def start_job(self, image_ids: list[str], overwrite: bool) -> BatchJobStatus:
+    def start_job(self, image_ids: List[str], overwrite: bool) -> BatchJobStatus:
         job_id = new_id()
         status = BatchJobStatus(
             job_id=job_id,
@@ -46,7 +46,7 @@ class BatchService:
         self._executor.submit(self._run_job, job_id, image_ids, overwrite)
         return status
 
-    def _run_job(self, job_id: str, image_ids: list[str], overwrite: bool) -> None:
+    def _run_job(self, job_id: str, image_ids: List[str], overwrite: bool) -> None:
         for image_id in image_ids:
             self._update(job_id, current_image=image_id)
             try:
@@ -85,7 +85,7 @@ class BatchService:
     def get_job(self, job_id: str) -> Optional[BatchJobStatus]:
         return self._jobs.get(job_id)
 
-    def list_jobs(self) -> list[BatchJobStatus]:
+    def list_jobs(self) -> List[BatchJobStatus]:
         return list(self._jobs.values())
 
 

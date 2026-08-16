@@ -19,7 +19,7 @@ caller, so the transform itself is testable in isolation.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 import cv2
 import numpy as np
@@ -35,7 +35,7 @@ class WheelCircle:
 
 
 def find_wheel_circle(
-    objects: list[AnnotationObject],
+    objects: List[AnnotationObject],
     img_width: int,
     img_height: int,
     wheel_class_name: str,
