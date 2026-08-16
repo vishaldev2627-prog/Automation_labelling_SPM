@@ -19,6 +19,6 @@ else
 fi
 
 echo "[entrypoint] Running Postgres migrations..."
-python3.11 -m alembic upgrade head
+${PYTHON:-python3} -m alembic upgrade head
 
 exec "$@"
