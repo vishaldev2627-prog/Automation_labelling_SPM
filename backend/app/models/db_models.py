@@ -29,6 +29,8 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from typing import Optional
+
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -72,12 +74,12 @@ class AnnotationState(Base):
     # Denormalized from payload["completed"] so progress/ETA queries
     # (get_dataset_info, list_images) don't need to parse JSON per row.
     completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
-    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
+    updated_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("annotators.id"), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    updated_by: Mapped["Annotator | None"] = relationship()
+    updated_by: Mapped[Optional["Annotator"]] = relationship()
 
 
 class AnnotationHistory(Base):
@@ -96,10 +98,10 @@ class AnnotationHistory(Base):
     image_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     action: Mapped[str] = mapped_column(String, nullable=False)  # e.g. "save", "mark_completed"
-    annotator_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
+    annotator_id: Mapped[Optional[int]] = mapped_column(ForeignKey("annotators.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
-    annotator: Mapped["Annotator | None"] = relationship()
+    annotator: Mapped[Optional["Annotator"]] = relationship()
 
 
 class AnnotationReview(Base):
@@ -124,7 +126,7 @@ class AnnotationReview(Base):
     reviewer_id: Mapped[int] = mapped_column(ForeignKey("annotators.id"), nullable=False)
     decision: Mapped[str] = mapped_column(String, nullable=False)  # "approved" | "rejected"
     reason: Mapped[str] = mapped_column(String, nullable=False)  # "second_review" | "audit_sample"
-    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     reviewer: Mapped["Annotator"] = relationship()
@@ -172,21 +174,21 @@ class DatasetSnapshot(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     snapshot_id: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
     dataset_view: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    class_map_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    class_map_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    class_map_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    class_map_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     manifest: Mapped[dict] = mapped_column(JSONB, nullable=False)
     local_path: Mapped[str] = mapped_column(String, nullable=False)
     file_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     total_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    published_uri: Mapped[str | None] = mapped_column(String, nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_uri: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_exported_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
+    created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("annotators.id"), nullable=True)
 
-    created_by: Mapped["Annotator | None"] = relationship()
+    created_by: Mapped[Optional["Annotator"]] = relationship()
 
 
 class ClassMapVersion(Base):
@@ -227,9 +229,9 @@ class ClassMapVersion(Base):
     names: Mapped[list] = mapped_column(JSONB, nullable=False)
     exclude_classes: Mapped[list] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
+    created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("annotators.id"), nullable=True)
 
-    created_by: Mapped["Annotator | None"] = relationship()
+    created_by: Mapped[Optional["Annotator"]] = relationship()
 
 
 class DatasetClass(Base):
@@ -286,8 +288,8 @@ class DatasetClass(Base):
     # by default - a conservative default a human can loosen later, not a
     # claim this codebase is making about any specific class).
     tier: Mapped[str] = mapped_column(String, nullable=False, server_default="structural")
-    deprecated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    deprecated_by_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
+    deprecated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    deprecated_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("annotators.id"), nullable=True)
 
 
 class GoldenSet(Base):
@@ -312,11 +314,11 @@ class GoldenSet(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     dataset_view: Mapped[str] = mapped_column(String, nullable=False, index=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
-    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
+    created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("annotators.id"), nullable=True)
 
-    created_by: Mapped["Annotator | None"] = relationship()
+    created_by: Mapped[Optional["Annotator"]] = relationship()
 
 
 class GoldenSetItem(Base):
@@ -348,7 +350,7 @@ class GoldenSetItem(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     golden_set_id: Mapped[int] = mapped_column(ForeignKey("golden_sets.id"), nullable=False, index=True)
     image_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    frozen_object_store_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    frozen_object_store_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     golden_set: Mapped["GoldenSet"] = relationship()
@@ -395,7 +397,7 @@ class ModelPromotion(Base):
     # even if the golden set (and therefore what a fresh comparison would
     # say) changes afterward.
     promotion_recommendation: Mapped[str] = mapped_column(String, nullable=False)
-    regressed_classes: Mapped[str | None] = mapped_column(String, nullable=True)
+    regressed_classes: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     # Module 6 of the class-incremental promotion plan (docs/
     # mlflow_class_incremental_architecture.md §I) - copied from the
     # `decision`/`hard_fail` tags model_registry_service writes (Module 5),
@@ -407,11 +409,11 @@ class ModelPromotion(Base):
     hard_fail: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     # Set only when a model_reviewer overrides an ordinary REJECT (never
     # possible for hard_fail=true - see model_promotion_service.approve()).
-    override_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    override_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, server_default="pending")
-    local_weights_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    local_weights_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("annotators.id"), nullable=True)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("annotators.id"), nullable=True)
 
-    decided_by: Mapped["Annotator | None"] = relationship()
+    decided_by: Mapped[Optional["Annotator"]] = relationship()
