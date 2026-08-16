@@ -28,7 +28,7 @@ import pathlib; p = pathlib.Path('/app/sam2/sam2/utils/transforms.py'); s = p.re
 old = 'torch.jit.script(\n            nn.Sequential(\n                Resize((self.resolution, self.resolution)),\n                Normalize(self.mean, self.std),\n            )\n        )'; \
 new = 'nn.Sequential(\n            Resize((self.resolution, self.resolution)),\n            Normalize(self.mean, self.std),\n        )'; \
 assert old in s, 'patch pattern not found'; p.write_text(s.replace(old, new))" && \
-    pip3 install --no-cache-dir --no-build-isolation --no-deps -e /app/sam2
+    pip3 install --no-cache-dir --no-build-isolation --no-deps --ignore-requires-python -e /app/sam2
 
 RUN python3 -c "import torchvision; torchvision.models.mobilenet_v3_small(weights=torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1)"
 
