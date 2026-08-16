@@ -17,7 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app/backend
 
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+# The dustynv base already has CUDA-enabled PyTorch 2.1.0 + torchvision 0.16.x
+# built for this JetPack. Pinning them as constraints prevents pip from
+# overwriting them with CPU-only PyPI wheels when resolving ultralytics' deps.
+RUN printf 'torch<=2.1.0\ntorchvision<=0.16.2\n' > /tmp/jetson_pin.txt && \
+    pip3 install --no-cache-dir -r requirements.txt -c /tmp/jetson_pin.txt
 
 # Clone SAM2 and apply the same aarch64 torch.jit.script() patch as the DGX
 # Dockerfile — on Jetson this patch is equally necessary (same aarch64 codegen
