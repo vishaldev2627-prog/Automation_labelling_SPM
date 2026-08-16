@@ -1,8 +1,10 @@
 # Jetson AGX Orin — JetPack 5.1.3 (L4T R35.4.1), CUDA 11.4, Ampere (sm_87)
-# nvcr.io/nvidia/l4t-pytorch ships PyTorch 2.1.0 + torchvision 0.16.1 pre-built
-# for this exact JetPack version. SAM2 declares torch>=2.5.1 but the ops we use
-# are stable in 2.1; we install it with --no-deps to skip the version guard.
-FROM nvcr.io/nvidia/l4t-pytorch:r35.4.1-pth2.1-py3
+# dustynv/pytorch is the community-maintained Jetson PyTorch image (by Dustin
+# Franklin, NVIDIA engineer) — the nvcr.io/nvidia/l4t-pytorch series was
+# deprecated. Ships PyTorch 2.1.0 + torchvision pre-built for this JetPack.
+# SAM2 declares torch>=2.5.1 but the ops we use are stable in 2.1; we install
+# it with --no-deps to skip the version guard.
+FROM dustynv/pytorch:2.1-r35.4.1
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
