@@ -121,6 +121,7 @@ services:
   backend:
     build:
       context: ./backend
+      dockerfile: ${BACKEND_DOCKERFILE:-Dockerfile.jetson}
     container_name: railway-annotator-backend
     restart: unless-stopped
     depends_on:
@@ -151,9 +152,9 @@ services:
       # fell back to its default and resolved relative to Coolify's managed
       # app directory instead of the real dataset. This is a single fixed
       # host deployment, so hardcoding is simplest and actually correct.
-      - /home/omronix/Component/annotation_dataset:/data/dataset
-      - /home/omronix/Component/annotation_tool/exports:/data/exports
-      - /home/omronix/Component/annotation_tool/models:/data/models
+      - ${DATASET_HOST_PATH:-/opt/annotation_dataset}:/data/dataset
+      - ${EXPORTS_HOST_PATH:-/opt/annotation_tool/exports}:/data/exports
+      - ${MODELS_HOST_PATH:-/opt/annotation_tool/models}:/data/models
       - logs_data:/app/logs
     environment:
       - DATASET_PATH=/data/dataset
@@ -183,22 +184,15 @@ services:
       # hardcoded like the paths above - it's the mlflow service's compose
       # DNS name.
       - MLFLOW_TRACKING_URI=http://mlflow:5000
-    # GPU passthrough via nvidia-container-toolkit; the backend image now installs
-    # a CUDA-enabled (cu128) torch build with Blackwell (sm_121) kernels for this
-    # host's GB10 GPU. sam_device=auto picks it up automatically when available.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    runtime: nvidia
 
   frontend:
     build:
       context: ./frontend
     container_name: railway-annotator-frontend
     restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
     depends_on:
       - backend
 
@@ -213,7 +207,7 @@ services:
     volumes:
       # Same exports host path as the backend service above - the dashboard
       # only needs read/write access to exports/class_folders.
-      - /home/omronix/Component/annotation_tool/exports:/data/exports
+      - ${EXPORTS_HOST_PATH:-/opt/annotation_tool/exports}:/data/exports
     environment:
       - CLASS_FOLDERS_ROOT=/data/exports/class_folders
       # DASHBOARD_USERNAME / DASHBOARD_PASSWORD are deliberately NOT declared
