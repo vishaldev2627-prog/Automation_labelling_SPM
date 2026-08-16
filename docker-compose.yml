@@ -2,22 +2,18 @@ services:
   backend:
     build:
       context: ./backend
+      dockerfile: ${BACKEND_DOCKERFILE:-Dockerfile.jetson}
     container_name: railway-annotator-backend
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
     volumes:
-      # Hardcoded absolute host paths rather than ${VAR}-interpolated ones:
-      # Coolify injects its UI-configured env vars straight into the
-      # container, but does not write them into a .env file for compose's
-      # own variable-substitution pass, so ${DATASET_HOST_PATH} silently
-      # fell back to its default and resolved relative to Coolify's managed
-      # app directory instead of the real dataset. This is a single fixed
-      # host deployment, so hardcoding is simplest and actually correct.
-      - /home/omronix/Component/annotation_dataset:/data/dataset
-      - /home/omronix/Component/annotation_tool/exports:/data/exports
-      - /home/omronix/Component/annotation_tool/models:/data/models
+      # Paths are set via Dokploy Environment Variables tab (or .env file for
+      # local dev). Defaults point to the AGX data location after dataset transfer.
+      - ${DATASET_HOST_PATH:-/opt/annotation_dataset}:/data/dataset
+      - ${EXPORTS_HOST_PATH:-/opt/annotation_tool/exports}:/data/exports
+      - ${MODELS_HOST_PATH:-/opt/annotation_tool/models}:/data/models
       - logs_data:/app/logs
     environment:
       - DATASET_PATH=/data/dataset
@@ -25,22 +21,15 @@ services:
       - MODELS_PATH=/data/models
       - SAM_CHECKPOINT=/data/models/sam2.1_hiera_large.pt
       - SAM_MODEL_CFG=configs/sam2.1/sam2.1_hiera_l.yaml
-    # GPU passthrough via nvidia-container-toolkit; the backend image now installs
-    # a CUDA-enabled (cu128) torch build with Blackwell (sm_121) kernels for this
-    # host's GB10 GPU. sam_device=auto picks it up automatically when available.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    runtime: nvidia
 
   frontend:
     build:
       context: ./frontend
     container_name: railway-annotator-frontend
     restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
     depends_on:
       - backend
 
@@ -49,23 +38,17 @@ services:
       context: ./review_dashboard
     container_name: railway-review-dashboard
     restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-8600}:8600"
     env_file:
       - path: .env
         required: false
     volumes:
-      # Same exports host path as the backend service above - the dashboard
-      # only needs read/write access to exports/class_folders.
-      - /home/omronix/Component/annotation_tool/exports:/data/exports
+      - ${EXPORTS_HOST_PATH:-/opt/annotation_tool/exports}:/data/exports
     environment:
       - CLASS_FOLDERS_ROOT=/data/exports/class_folders
-      # DASHBOARD_USERNAME / DASHBOARD_PASSWORD are deliberately NOT declared
-      # here as ${VAR}-interpolated entries - see the backend volumes comment
-      # above for why: Coolify injects its UI-configured env vars straight
-      # into the container, not into a .env file compose reads for its own
-      # substitution pass, so ${DASHBOARD_USERNAME} would silently resolve to
-      # empty. Set them directly in Coolify's per-service Environment
-      # Variables tab instead; app.py reads them from the container env at
-      # runtime regardless of whether they're listed here.
+      # Set DASHBOARD_USERNAME and DASHBOARD_PASSWORD in Dokploy's Environment
+      # Variables tab — they are read from the container env at runtime.
 
 volumes:
   logs_data:
