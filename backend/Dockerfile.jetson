@@ -46,8 +46,9 @@ new = 'nn.Sequential(\n            Resize((self.resolution, self.resolution)),\n
 assert old in s, 'patch pattern not found'; p.write_text(s.replace(old, new))" && \
     pip3 install --no-cache-dir --no-build-isolation --no-deps --ignore-requires-python -e /app/sam2
 
-# Verify the CUDA torch and compatible torchvision are in place
-RUN python3 -c "import torch, torchvision, warnings; warnings.filterwarnings('ignore'); assert torch.cuda.is_available(), 'CUDA not available after torch restore'; print('Build check OK: torch', torch.__version__, '/ CUDA', torch.version.cuda, '/ torchvision', torchvision.__version__)"
+# Verify the right packages are installed. Cannot check torch.cuda.is_available()
+# here — GPU is not exposed during docker build; that check runs at startup.
+RUN python3 -c "import warnings; warnings.filterwarnings('ignore'); import torch, torchvision; assert '2.1' in torch.__version__, 'wrong torch: ' + torch.__version__; assert torchvision.__version__ == '0.15.2', 'wrong tv: ' + torchvision.__version__; print('Build check OK: torch', torch.__version__, '/ torchvision', torchvision.__version__)"
 
 # Pre-download MobileNetV3 weights into the image layer so the first request
 # is fast. The /data volume mounts over this on first run (weights persist
