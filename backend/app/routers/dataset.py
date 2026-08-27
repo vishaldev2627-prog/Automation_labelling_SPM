@@ -33,6 +33,23 @@ DATASET_VIEWS = [
     DatasetView(key="underbelly", label="Underbelly"),
     DatasetView(key="wheel_shelling", label="Wheel Shelling"),
     DatasetView(key="buffer", label="Buffer"),
+    # Aug-24 raw captures migrated from VPS (4 sessions × all cameras)
+    DatasetView(key="45f61435_cam01", label="Aug24 S1 – cam01 (2,690)"),
+    DatasetView(key="45f61435_cam02", label="Aug24 S1 – cam02 (2,175)"),
+    DatasetView(key="45f61435_cam04", label="Aug24 S1 – cam04 (2,683)"),
+    DatasetView(key="45f61435_cam07", label="Aug24 S1 – cam07 (2,683)"),
+    DatasetView(key="8ad7f3f8_cam01", label="Aug24 S2 – cam01 (1,976)"),
+    DatasetView(key="8ad7f3f8_cam03", label="Aug24 S2 – cam03 (1,628)"),
+    DatasetView(key="8ad7f3f8_cam04", label="Aug24 S2 – cam04 (1,980)"),
+    DatasetView(key="8ad7f3f8_cam07", label="Aug24 S2 – cam07 (1,974)"),
+    DatasetView(key="8e9323dd_cam01", label="Aug24 S3 – cam01 (3,053)"),
+    DatasetView(key="8e9323dd_cam02", label="Aug24 S3 – cam02 (2,485)"),
+    DatasetView(key="8e9323dd_cam04", label="Aug24 S3 – cam04 (3,064)"),
+    DatasetView(key="8e9323dd_cam07", label="Aug24 S3 – cam07 (3,058)"),
+    DatasetView(key="fff10513_cam01", label="Aug24 S4 – cam01 (10,889)"),
+    DatasetView(key="fff10513_cam02", label="Aug24 S4 – cam02 (1,143)"),
+    DatasetView(key="fff10513_cam04", label="Aug24 S4 – cam04 (10,894)"),
+    DatasetView(key="fff10513_cam07", label="Aug24 S4 – cam07 (10,884)"),
 ]
 _VIEW_KEYS = {v.key for v in DATASET_VIEWS}
 
