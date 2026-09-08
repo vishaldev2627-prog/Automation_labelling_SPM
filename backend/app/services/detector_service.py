@@ -411,6 +411,18 @@ class DetectorService:
                 exist_ok=True,
                 verbose=False,
                 patience=20,
+                # workers=0 - Ultralytics' default (8) forks that many
+                # DataLoader worker processes, each passing batches back
+                # through /dev/shm. The backend container's shm is Docker's
+                # 64MB default (docker-compose has no shm_size override),
+                # so a handful of queued batches reliably hit "[Errno 28] No
+                # space left on device" - confirmed live, right after the
+                # batch-size/OOM fix let training reach this stage. Loading
+                # data in the main process avoids the shared-memory
+                # dependency entirely rather than growing shm_size, which
+                # would compete with the same tight RAM the batch-size fix
+                # was just protecting (see detector_train_batch_size).
+                workers=0,
                 # Module 8 (docs/mlflow_class_incremental_architecture.md
                 # §F): Ultralytics' own built-in inverse-class-frequency
                 # loss weighting (verified against the installed version's
