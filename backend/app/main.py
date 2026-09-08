@@ -4,6 +4,12 @@ from __future__ import annotations
 import logging
 import time
 
+from app.utils.torchvision_nms_patch import apply as _apply_torchvision_nms_patch
+
+# Must run before anything (routers, detector_service, ultralytics) has a
+# chance to call torchvision.ops.nms - see torchvision_nms_patch's docstring.
+_apply_torchvision_nms_patch()
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
