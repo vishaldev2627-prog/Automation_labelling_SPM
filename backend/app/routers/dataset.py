@@ -46,10 +46,7 @@ DATASET_VIEWS = [
     DatasetView(key="8e9323dd_cam02", label="Aug24 S3 – cam02 (2,485)"),
     DatasetView(key="8e9323dd_cam04", label="Aug24 S3 – cam04 (3,064)"),
     DatasetView(key="8e9323dd_cam07", label="Aug24 S3 – cam07 (3,058)"),
-    DatasetView(key="fff10513_cam01", label="Aug24 S4 – cam01 (10,889)"),
-    DatasetView(key="fff10513_cam02", label="Aug24 S4 – cam02 (1,143)"),
-    DatasetView(key="fff10513_cam04", label="Aug24 S4 – cam04 (10,894)"),
-    DatasetView(key="fff10513_cam07", label="Aug24 S4 – cam07 (10,884)"),
+    # Aug24 S4 (fff10513_cam01/02/04/07) removed - frames deleted from disk.
     # Gap dataset: raw unlabeled frame dump for gap-defect annotation.
     DatasetView(key="gap_dataset", label="Gap Dataset (8,900)"),
 ]
