@@ -50,6 +50,8 @@ DATASET_VIEWS = [
     DatasetView(key="fff10513_cam02", label="Aug24 S4 – cam02 (1,143)"),
     DatasetView(key="fff10513_cam04", label="Aug24 S4 – cam04 (10,894)"),
     DatasetView(key="fff10513_cam07", label="Aug24 S4 – cam07 (10,884)"),
+    # Gap dataset: raw unlabeled frame dump for gap-defect annotation.
+    DatasetView(key="gap_dataset", label="Gap Dataset (8,900)"),
 ]
 _VIEW_KEYS = {v.key for v in DATASET_VIEWS}
 
