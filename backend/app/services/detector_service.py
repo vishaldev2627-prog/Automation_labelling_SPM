@@ -404,7 +404,7 @@ class DetectorService:
             model.train(
                 data=str(data_yaml),
                 epochs=EPOCHS,
-                batch=-1,
+                batch=settings.detector_train_batch_size,
                 device=device,
                 project=str(staging_dir),
                 name="run",

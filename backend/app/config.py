@@ -145,6 +145,19 @@ class Settings(BaseSettings):
     gpu_wait_max_seconds: int = 600
     gpu_wait_poll_seconds: int = 5
 
+    # Fixed training batch size, replacing Ultralytics' AutoBatch (batch=-1).
+    # AutoBatch profiles *GPU* memory and picks the largest batch that fits -
+    # on a Jetson's unified memory (GPU and system RAM are the same pool),
+    # that profiling doesn't see the RAM already held by Postgres/MinIO/
+    # MLflow/SAM2/the frontend, so it habitually sized a batch too large and
+    # got the whole backend process OOM-killed by the kernel (dmesg: repeated
+    # "Out of memory: Killed process ... python3") - a hard crash, not a
+    # catchable CUDA OOM exception, since the kernel OOM-killer doesn't know
+    # or care which allocation was "CUDA". 4 is a conservative starting point
+    # for this box's 7.3GB total RAM shared across all those services; raise
+    # it only against measured headroom, not a guess.
+    detector_train_batch_size: int = 4
+
     # M6: score a just-trained detector against the golden set (if one
     # exists for the view) and log the result onto the same MLflow run -
     # per-class, never aggregate-only, see golden_eval_service.py. Skips
